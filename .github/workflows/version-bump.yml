@@ -1,0 +1,40 @@
+name: Version Bump
+
+# GitFlow versioning via the reusable workflow in KarlesP/cadence.
+# All logic lives in cadence; this is a thin caller. A root `VERSION` file (vX.Y.Z) is the
+# source of truth, bumped per branch + conventional commits.
+#
+# Branch -> bump -> output:
+#   main        -> patch (or conventional commit) -> stable tag + GH Release
+#   release/**  -> minor                          -> RC pre-release tag + GH Release
+#   hotfix/**   -> patch                          -> hotfix pre-release tag + GH Release
+#   develop     -> minor                          -> VERSION file only
+#   feature/**  -> patch                          -> VERSION file only
+#
+# NOTE: the automatic push trigger is intentionally disabled for now. Uncomment the `push`
+# block below to enable per-branch auto-versioning on push. Until then the workflow only runs
+# when dispatched manually.
+on:
+  # push:
+  #   branches:
+  #     - main
+  #     - develop
+  #     - "release/**"
+  #     - "hotfix/**"
+  #     - "feature/**"
+  workflow_dispatch:
+
+concurrency:
+  group: version-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  bump:
+    name: Bump version
+    # Skip the bot's own VERSION commits to prevent an infinite loop.
+    if: "!contains(github.event.head_commit.message, '[skip ci]')"
+    permissions:
+      contents: write
+    uses: KarlesP/cadence/.github/workflows/version-bump.yml@main
+    secrets:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

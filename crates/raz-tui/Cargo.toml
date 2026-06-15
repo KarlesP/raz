@@ -1,0 +1,19 @@
+[package]
+name = "raz-tui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "raz-tui — interactive ratatui + tachyonfx dashboard built on raz-core."
+
+[[bin]]
+name = "raz-tui"
+path = "src/main.rs"
+
+[dependencies]
+raz-core = { workspace = true }
+tokio = { workspace = true }
+reqwest = { workspace = true }
+serde_json = { workspace = true }
+ratatui = { workspace = true }
+tachyonfx = { workspace = true }

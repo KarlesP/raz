@@ -1,0 +1,6 @@
+# Rust build output — never committed.
+/target
+/dist
+
+# Editor/back-up cruft
+**/*.rs.bk
