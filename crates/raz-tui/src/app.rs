@@ -317,7 +317,10 @@ impl App {
         if !tenant.is_empty() {
             if let Some(refresh) = &cached.refresh_token {
                 if let Ok(tok) = self.rt.block_on(device_code::exchange_refresh_token(
-                    &self.http, tenant, refresh,
+                    &self.http,
+                    tenant,
+                    refresh,
+                    device_code::DEFAULT_SCOPE,
                 )) {
                     return Some(tok.access_token);
                 }

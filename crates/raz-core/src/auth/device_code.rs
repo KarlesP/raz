@@ -17,11 +17,14 @@ pub const CLIENT_ID: &str = "04b07795-8ddb-461a-bbee-02f9e1bf7b46";
 pub const DEFAULT_SCOPE: &str =
     "https://management.azure.com/.default offline_access openid profile";
 
+/// Microsoft Graph scope, for app/federated-credential management (`raz ad ...`).
+pub const GRAPH_SCOPE: &str = "https://graph.microsoft.com/.default offline_access openid profile";
+
 fn devicecode_url(tenant: &str) -> String {
     format!("https://login.microsoftonline.com/{tenant}/oauth2/v2.0/devicecode")
 }
 
-fn token_url(tenant: &str) -> String {
+pub(crate) fn token_url(tenant: &str) -> String {
     format!("https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token")
 }
 
@@ -126,14 +129,15 @@ pub async fn poll_token_once(
     }
 }
 
-/// Exchange a refresh token for a fresh access token scoped to `tenant`. This is how raz
-/// (like az) obtains per-tenant ARM tokens after a single interactive login: ARM's
-/// `/subscriptions` is tenant-scoped, so each tenant needs its own token, and the refresh
-/// token from the initial login can be redeemed against any tenant the identity can access.
+/// Exchange a refresh token for a fresh access token for `tenant` and `scope`. This is how raz
+/// (like az) obtains per-tenant tokens after a single interactive login: resources are
+/// tenant-scoped, so each tenant/scope needs its own token, redeemed from the login refresh
+/// token. `scope` selects the audience (ARM vs Microsoft Graph).
 pub async fn exchange_refresh_token(
     http: &reqwest::Client,
     tenant: &str,
     refresh_token: &str,
+    scope: &str,
 ) -> Result<TokenResponse> {
     let resp = http
         .post(token_url(tenant))
@@ -141,7 +145,7 @@ pub async fn exchange_refresh_token(
             ("grant_type", "refresh_token"),
             ("client_id", CLIENT_ID),
             ("refresh_token", refresh_token),
-            ("scope", DEFAULT_SCOPE),
+            ("scope", scope),
         ])
         .send()
         .await?;

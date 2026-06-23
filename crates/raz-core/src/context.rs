@@ -79,9 +79,13 @@ impl Context {
         let cached = self.profile.token.as_ref().ok_or(RazError::NotLoggedIn)?;
         if !tenant.is_empty() {
             if let Some(refresh) = &cached.refresh_token {
-                let tok =
-                    crate::auth::device_code::exchange_refresh_token(&self.http, tenant, refresh)
-                        .await?;
+                let tok = crate::auth::device_code::exchange_refresh_token(
+                    &self.http,
+                    tenant,
+                    refresh,
+                    crate::auth::device_code::DEFAULT_SCOPE,
+                )
+                .await?;
                 return Ok(tok.access_token);
             }
         }
@@ -90,5 +94,31 @@ impl Context {
         } else {
             Ok(cached.access_token.clone())
         }
+    }
+
+    /// Mint a Microsoft Graph access token for the home tenant, for `raz ad ...` commands.
+    /// Requires an interactive login (the refresh token); service-principal sessions can't mint
+    /// a differently-scoped token and will get a clear error.
+    pub async fn graph_token(&self) -> Result<String> {
+        let tenant = self
+            .profile
+            .tenant_id
+            .clone()
+            .ok_or(RazError::NotLoggedIn)?;
+        let cached = self.profile.token.as_ref().ok_or(RazError::NotLoggedIn)?;
+        let refresh = cached.refresh_token.as_ref().ok_or_else(|| {
+            RazError::Auth(
+                "Graph commands require an interactive `raz login` (no refresh token in this session)"
+                    .into(),
+            )
+        })?;
+        let tok = crate::auth::device_code::exchange_refresh_token(
+            &self.http,
+            &tenant,
+            refresh,
+            crate::auth::device_code::GRAPH_SCOPE,
+        )
+        .await?;
+        Ok(tok.access_token)
     }
 }

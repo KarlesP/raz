@@ -62,6 +62,11 @@ enum TopCommand {
         #[command(subcommand)]
         command: commands::account::AccountCommand,
     },
+    /// Microsoft Entra directory operations (app federated credentials).
+    Ad {
+        #[command(subcommand)]
+        command: commands::ad::AdCommand,
+    },
     /// Manage resource groups.
     Group {
         #[command(subcommand)]
@@ -105,6 +110,7 @@ async fn run(cli: Cli) -> Result<(), RazError> {
         TopCommand::Login(args) => commands::login::run(args, &globals).await,
         TopCommand::Logout => commands::logout::run().await,
         TopCommand::Account { command } => commands::account::run(command, globals).await,
+        TopCommand::Ad { command } => commands::ad::run(command, globals).await,
         TopCommand::Group { command } => commands::group::run(command, globals).await,
         TopCommand::Vnet { command } => commands::vnet::run(command, globals).await,
         TopCommand::Vm { command } => commands::vm::run(command, globals).await,
