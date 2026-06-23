@@ -1,4 +1,4 @@
-# raz — a Rust port of a slice of the Azure CLI
+# 🦍 raz — a Rust port of a slice of the Azure CLI
 
 > **Blazing fast Azure CLI, written in Rust.**
 
@@ -11,11 +11,13 @@ command-module design and ships **two front-ends over one core library**:
 
 ## Screenshots (raz-tui)
 
-> _Placeholders — drop the real captures into `docs/screenshots/` to replace these._
+<!--
+  Placeholders — uncomment once the captures are added to docs/screenshots/.
 
-| Login (device code) | Subscriptions | Resource explorer |
-|---|---|---|
-| ![raz-tui login screen](docs/screenshots/tui-login.png) | ![raz-tui subscriptions list](docs/screenshots/tui-subscriptions.png) | ![raz-tui VM/VNet explorer](docs/screenshots/tui-resources.png) |
+  | Login (device code) | Subscriptions | Resource explorer |
+  |---|---|---|
+  | ![raz-tui login screen](docs/screenshots/tui-login.png) | ![raz-tui subscriptions list](docs/screenshots/tui-subscriptions.png) | ![raz-tui VM/VNet explorer](docs/screenshots/tui-resources.png) |
+-->
 
 ## Workspace
 
