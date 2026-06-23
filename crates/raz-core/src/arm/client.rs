@@ -198,6 +198,60 @@ impl ArmClient {
         )))
     }
 
+    /// POST an action endpoint (e.g. a VM `/start`) and wait for it to finish. Actions are
+    /// long-running: a 202 carries an `Azure-AsyncOperation` (or `Location`) header pointing at
+    /// a status URL that we poll until terminal. A 2xx without a header is treated as done.
+    pub async fn post_action(&self, path: &str, api_version: &str) -> Result<()> {
+        let url = format!("{ARM_ENDPOINT}{path}?api-version={api_version}");
+        let resp = self
+            .http
+            .post(&url)
+            .bearer_auth(&self.token)
+            .header(reqwest::header::CONTENT_LENGTH, 0)
+            .send()
+            .await?;
+        let status = resp.status();
+        if !status.is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            return Err(map_status(status.as_u16(), path, body));
+        }
+        let op_url = resp
+            .headers()
+            .get("azure-asyncoperation")
+            .or_else(|| resp.headers().get("location"))
+            .and_then(|h| h.to_str().ok())
+            .map(str::to_string);
+        match op_url {
+            Some(op) => self.poll_async_operation(&op).await,
+            None => Ok(()), // synchronous completion
+        }
+    }
+
+    /// Poll an async-operation status URL until its `status` is terminal.
+    async fn poll_async_operation(&self, url: &str) -> Result<()> {
+        for _ in 0..POLL_MAX_ATTEMPTS {
+            let resp = self.http.get(url).bearer_auth(&self.token).send().await?;
+            if !resp.status().is_success() {
+                let body = resp.text().await.unwrap_or_default();
+                return Err(RazError::Http(format!("operation poll failed: {body}")));
+            }
+            let body = resp.json::<Value>().await.unwrap_or(Value::Null);
+            match body.get("status").and_then(Value::as_str).unwrap_or("") {
+                "Succeeded" => return Ok(()),
+                "Failed" | "Canceled" => {
+                    return Err(RazError::Http(format!(
+                        "operation {}",
+                        body.get("status")
+                            .and_then(Value::as_str)
+                            .unwrap_or("failed")
+                    )))
+                }
+                _ => tokio::time::sleep(POLL_INTERVAL).await,
+            }
+        }
+        Err(RazError::Http("timed out waiting for operation".into()))
+    }
+
     /// Ensure a resource group exists in `location` (idempotent PUT). Resource-group PUT is not
     /// long-running. Returns the resource group resource.
     pub async fn ensure_resource_group(

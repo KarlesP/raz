@@ -35,6 +35,9 @@ pub struct DeviceCodeResponse {
     pub device_code: String,
     pub user_code: String,
     pub verification_uri: String,
+    /// Verification URL with the code pre-filled, when the provider returns one.
+    #[serde(default)]
+    pub verification_uri_complete: Option<String>,
     pub expires_in: i64,
     #[serde(default = "default_interval")]
     pub interval: u64,
@@ -43,6 +46,17 @@ pub struct DeviceCodeResponse {
 
 fn default_interval() -> u64 {
     5
+}
+
+/// Open the device-login page in the user's default browser (best-effort — the URL and code are
+/// still printed, so a failure or headless environment just falls back to manual entry). Prefers
+/// the code-prefilled URL when present.
+pub fn open_verification(dc: &DeviceCodeResponse) {
+    let url = dc
+        .verification_uri_complete
+        .as_deref()
+        .unwrap_or(&dc.verification_uri);
+    let _ = open::that(url);
 }
 
 /// Successful token response.
