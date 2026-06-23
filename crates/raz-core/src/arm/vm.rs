@@ -1,9 +1,7 @@
-//! Virtual machine operations — the raz analogue of az's `vm` command group.
-//!
-//! `list`/`show` are live ARM reads. `create` orchestrates the supporting resources a VM needs
-//! (resource group, virtual network + subnet, NIC) and then the VM itself, defaulting to West
-//! Europe and a small Ubuntu image. `update` patches size/tags; `delete` removes the VM.
-//! `start`/`stop` remain stubbed (action-style long-running operations).
+//! Virtual machine operations (az `vm`). `create` orchestrates the resources a VM needs
+//! (resource group, virtual network + subnet, NIC) then the VM, defaulting to West Europe
+//! and a small Ubuntu image. `update` patches size/tags; `delete` removes the VM.
+//! `start`/`stop` are not yet implemented (they are action-style long-running operations).
 
 use serde_json::{json, Value};
 
@@ -263,20 +261,14 @@ pub async fn delete(
     client.wait_deleted(&path, API_VERSION).await
 }
 
-/// `raz vm start` — stubbed (real impl POSTs `/start` and polls the LRO).
+/// `raz vm start` — not yet implemented (POST `/start`, then poll the operation).
 pub async fn start(_name: &str) -> Result<Value> {
-    Err(RazError::NotImplemented(
-        "vm start POSTs the /start action and polls a long-running operation; not wired in this skeleton"
-            .into(),
-    ))
+    Err(RazError::NotImplemented("vm start".into()))
 }
 
-/// `raz vm stop` — stubbed (real impl POSTs `/powerOff` and polls the LRO).
+/// `raz vm stop` — not yet implemented (POST `/powerOff`, then poll the operation).
 pub async fn stop(_name: &str) -> Result<Value> {
-    Err(RazError::NotImplemented(
-        "vm stop POSTs the /powerOff action and polls a long-running operation; not wired in this skeleton"
-            .into(),
-    ))
+    Err(RazError::NotImplemented("vm stop".into()))
 }
 
 fn normalize_list(body: Value) -> Value {

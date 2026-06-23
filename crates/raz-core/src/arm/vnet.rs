@@ -1,7 +1,5 @@
-//! Virtual network operations — the raz analogue of az's `network vnet` command group.
-//!
-//! `list`/`show` are live ARM reads; `create`/`delete` are intentionally stubbed in this
-//! skeleton (they would issue PUT/DELETE and, for create, poll a long-running operation).
+//! Virtual network operations (az `network vnet`). Create/update/delete are real ARM
+//! PUT/DELETE calls followed by long-running-operation polling.
 
 use serde_json::{json, Value};
 

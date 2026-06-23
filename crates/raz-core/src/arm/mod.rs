@@ -1,10 +1,5 @@
-//! Azure Resource Manager (ARM) REST access and the vnet/vm operations.
-//!
-//! There are no management-plane SDK crates in the vendored azure-sdk-for-rust, so we call
-//! the ARM REST API directly. [`client::ArmClient`] is the thin transport (the production
-//! analogue would build an `azure_core::http::Pipeline` with a `BearerTokenPolicy`); the
-//! [`vnet`] and [`vm`] modules hold the resource operations, mirroring az's per-service
-//! command modules.
+//! Azure Resource Manager access. [`client::ArmClient`] is the REST transport; [`group`],
+//! [`vnet`], and [`vm`] hold the per-service operations (one module per az command group).
 
 pub mod client;
 pub mod group;

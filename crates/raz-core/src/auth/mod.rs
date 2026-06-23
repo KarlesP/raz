@@ -1,15 +1,10 @@
-//! Authentication: the OAuth 2.0 device-code flow against Microsoft Entra, plus a
-//! cached-token credential. This is raz's `raz login` / `raz logout` backend, the
-//! analogue of az's `profile/custom.py`.
-//!
-//! In a production port the credential here would be an `azure_identity` implementation of
-//! `azure_core::credentials::TokenCredential`; the [`credential::TokenSource`] trait is
-//! shaped to make that substitution mechanical.
+//! Authentication: the OAuth 2.0 device-code login against Microsoft Entra, plus the helper
+//! that turns its token response into a cache entry. Backs `raz login` / `raz logout`.
 
 pub mod credential;
 pub mod device_code;
 
-/// Current wall-clock time as Unix seconds. Centralized so tests can reason about expiry.
+/// Wall-clock time as Unix seconds. Centralized so token-expiry logic has a single source.
 pub fn now_unix() -> i64 {
     use std::time::{SystemTime, UNIX_EPOCH};
     SystemTime::now()

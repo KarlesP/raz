@@ -63,12 +63,12 @@ pub enum VmCommand {
         #[arg(long, short = 'n')]
         name: String,
     },
-    /// Start a virtual machine (stubbed in this skeleton).
+    /// Start a virtual machine (not yet implemented).
     Start {
         #[arg(long, short = 'n')]
         name: String,
     },
-    /// Stop (power off) a virtual machine (stubbed in this skeleton).
+    /// Stop (power off) a virtual machine (not yet implemented).
     Stop {
         #[arg(long, short = 'n')]
         name: String,

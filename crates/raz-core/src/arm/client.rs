@@ -9,7 +9,6 @@ use std::time::Duration;
 
 use crate::auth::device_code::{self, TokenResponse};
 use crate::config::Subscription;
-use crate::context::Context;
 use crate::error::{RazError, Result};
 
 /// ARM endpoint host. Single-cloud only (public cloud); multi-cloud is out of scope.
@@ -95,15 +94,8 @@ pub struct ArmClient {
 }
 
 impl ArmClient {
-    /// Build a client from the active [`Context`], requiring a valid cached token.
-    pub fn from_context(ctx: &Context) -> Result<Self> {
-        Ok(Self {
-            http: ctx.http.clone(),
-            token: ctx.access_token()?,
-        })
-    }
-
-    /// Build directly from a token (used during login before a Context exists).
+    /// Build a client bound to a specific bearer token. Tokens are tenant-scoped, so callers
+    /// mint the right one per subscription (see [`crate::context::Context`]).
     pub fn with_token(http: reqwest::Client, token: String) -> Self {
         Self { http, token }
     }

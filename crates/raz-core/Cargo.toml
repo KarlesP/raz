@@ -14,5 +14,3 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 comfy-table = { workspace = true }
 dirs = { workspace = true }
-time = { workspace = true }
-async-trait = { workspace = true }

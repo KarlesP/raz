@@ -1,30 +1,25 @@
-//! The execution [`Context`] threaded through every command — the raz analogue of az's
-//! `cli_ctx`. It bundles the HTTP client, the loaded profile, the active subscription,
-//! and the selected output format.
+//! The execution [`Context`] threaded through every command: the HTTP client, the loaded
+//! profile, and the global options. The az analogue of `cli_ctx` plus global args.
 
 use crate::config::Profile;
 use crate::error::{RazError, Result};
 use crate::output::OutputFormat;
 
-/// Global, command-independent options (mirrors az's global args like `--subscription`
-/// and `--output`). Parsed by the CLI/TUI front-ends and handed to the context.
+/// Command-independent options that apply to any subcommand (`--subscription`, `--output`,
+/// `--query`). Parsed by the front-ends and handed to the context.
 #[derive(Debug, Clone, Default)]
 pub struct GlobalArgs {
-    /// Subscription id or name override (`--subscription/-s`).
     pub subscription: Option<String>,
-    /// Output format (`--output/-o`).
     pub output: OutputFormat,
-    /// Optional dotted-path projection applied to JSON output (`--query`, basic subset).
+    /// Dotted-path projection of JSON output (a small subset of az's JMESPath `--query`).
     pub query: Option<String>,
 }
 
-/// Create the shared HTTP client. Centralized so unauthenticated flows (device-code login)
-/// and the ARM client use identical settings.
+/// Shared HTTP client constructor, so login and the ARM client use identical settings.
 pub fn new_http_client() -> reqwest::Client {
     reqwest::Client::new()
 }
 
-/// Per-invocation context shared by all commands.
 pub struct Context {
     pub http: reqwest::Client,
     pub profile: Profile,
@@ -41,31 +36,8 @@ impl Context {
         })
     }
 
-    /// The subscription id to target: the `--subscription` override (matched by id or
-    /// name against the logged-in subscriptions) else the profile default.
-    pub fn subscription_id(&self) -> Result<String> {
-        if let Some(want) = &self.globals.subscription {
-            if let Some(sub) = self
-                .profile
-                .subscriptions
-                .iter()
-                .find(|s| &s.id == want || &s.name == want)
-            {
-                return Ok(sub.id.clone());
-            }
-            // Allow a raw id even if not in the cached list.
-            return Ok(want.clone());
-        }
-        self.profile
-            .default_subscription()
-            .map(|s| s.id.clone())
-            .ok_or(RazError::NotLoggedIn)
-    }
-
-    /// A currently-valid bearer token, or [`RazError::NotLoggedIn`] if unavailable/expired.
-    ///
-    /// In a production port this is where an `azure_identity` credential would transparently
-    /// refresh; here we surface expiry to the user as a re-login prompt.
+    /// A non-expired cached bearer token, else [`RazError::NotLoggedIn`]. Used only as the
+    /// fallback when there is no refresh token to mint a tenant-scoped token from.
     pub fn access_token(&self) -> Result<String> {
         let now = crate::auth::now_unix();
         match &self.profile.token {

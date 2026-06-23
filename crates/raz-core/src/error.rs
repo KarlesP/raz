@@ -5,7 +5,6 @@
 
 use std::fmt;
 
-/// Result alias used across raz-core, analogous to az's use of a single error channel.
 pub type Result<T> = std::result::Result<T, RazError>;
 
 #[derive(Debug, thiserror::Error)]
@@ -30,7 +29,7 @@ pub enum RazError {
     #[error("request failed: {0}")]
     Http(String),
 
-    /// A feature intentionally left as a stub in this skeleton.
+    /// A command that is recognized but not yet implemented.
     #[error("not implemented: {0}")]
     NotImplemented(String),
 
