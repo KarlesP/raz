@@ -42,6 +42,48 @@ struct LoginState {
     status: String,
 }
 
+/// Command names offered by the palette's autocomplete. Session commands (login/logout) are
+/// omitted — the TUI owns the session via its login gate.
+const COMMANDS: &[&str] = &[
+    "account list",
+    "account show",
+    "account set",
+    "account list-tenants",
+    "group list",
+    "group show",
+    "group create",
+    "group delete",
+    "vnet list",
+    "vnet show",
+    "vnet create",
+    "vnet update",
+    "vnet delete",
+    "vm list",
+    "vm show",
+    "vm create",
+    "vm update",
+    "vm delete",
+];
+
+/// The `:`-activated command bar: a text input, prefix-autocomplete over [`COMMANDS`], and the
+/// output of the last executed command.
+struct Palette {
+    input: String,
+    selected: usize,
+    output: String,
+}
+
+impl Palette {
+    fn suggestions(&self) -> Vec<&'static str> {
+        let q = self.input.trim_start();
+        COMMANDS
+            .iter()
+            .copied()
+            .filter(|c| c.starts_with(q))
+            .collect()
+    }
+}
+
 pub struct App {
     pub should_quit: bool,
     rt: Runtime,
@@ -58,6 +100,7 @@ pub struct App {
     res_state: ListState,
     message: String,
 
+    palette: Option<Palette>,
     effects: EffectManager<()>,
 }
 
@@ -92,6 +135,7 @@ impl App {
             vnets: Vec::new(),
             res_state: ListState::default(),
             message: String::new(),
+            palette: None,
             effects: EffectManager::default(),
         };
 
@@ -232,7 +276,20 @@ impl App {
     // ------------------------------------------------------------------ input
 
     pub fn handle_key(&mut self, code: KeyCode) {
-        // Global quit.
+        // The command palette captures all keys (including 'q') while open.
+        if self.palette.is_some() {
+            self.handle_palette_key(code);
+            return;
+        }
+        // `:` opens the command bar from the dashboard.
+        if code == KeyCode::Char(':') && !matches!(self.view, View::Login) {
+            self.palette = Some(Palette {
+                input: String::new(),
+                selected: 0,
+                output: String::new(),
+            });
+            return;
+        }
         if matches!(code, KeyCode::Char('q')) {
             self.should_quit = true;
             return;
@@ -245,6 +302,63 @@ impl App {
             }
             View::Subscriptions => self.handle_subscriptions_key(code),
             View::Resources => self.handle_resources_key(code),
+        }
+    }
+
+    fn handle_palette_key(&mut self, code: KeyCode) {
+        let Some(palette) = self.palette.as_mut() else {
+            return;
+        };
+        match code {
+            KeyCode::Esc => self.palette = None,
+            KeyCode::Enter => self.run_palette_command(),
+            KeyCode::Tab => {
+                let suggestions = palette.suggestions();
+                if let Some(choice) = suggestions.get(palette.selected) {
+                    palette.input = format!("{choice} ");
+                    palette.selected = 0;
+                }
+            }
+            KeyCode::Down => {
+                let n = palette.suggestions().len();
+                if n > 0 {
+                    palette.selected = (palette.selected + 1) % n;
+                }
+            }
+            KeyCode::Up => {
+                let n = palette.suggestions().len();
+                if n > 0 {
+                    palette.selected = (palette.selected + n - 1) % n;
+                }
+            }
+            KeyCode::Backspace => {
+                palette.input.pop();
+                palette.selected = 0;
+            }
+            KeyCode::Char(c) => {
+                palette.input.push(c);
+                palette.selected = 0;
+            }
+            _ => {}
+        }
+    }
+
+    /// Run the typed command by invoking the sibling `raz` binary and capturing its output,
+    /// then refresh the cached resource lists in case the command mutated something.
+    fn run_palette_command(&mut self) {
+        let input = match &self.palette {
+            Some(p) => p.input.trim().to_string(),
+            None => return,
+        };
+        if input.is_empty() {
+            return;
+        }
+        let output = run_raz(&input);
+        if let Some(p) = self.palette.as_mut() {
+            p.output = output;
+        }
+        if self.selected_subscription().is_some() {
+            self.load_resources();
         }
     }
 
@@ -346,14 +460,77 @@ impl App {
 
     pub fn draw(&mut self, frame: &mut Frame, elapsed: StdDuration) {
         let area = frame.area();
-        match self.view {
-            View::Login => self.draw_login(frame, area),
-            View::Subscriptions => self.draw_subscriptions(frame, area),
-            View::Resources => self.draw_resources(frame, area),
+        if self.palette.is_some() {
+            self.draw_palette(frame, area);
+        } else {
+            match self.view {
+                View::Login => self.draw_login(frame, area),
+                View::Subscriptions => self.draw_subscriptions(frame, area),
+                View::Resources => self.draw_resources(frame, area),
+            }
         }
         // Apply queued tachyonfx effects over the rendered frame.
         self.effects
             .process_effects(elapsed.into(), frame.buffer_mut(), area);
+    }
+
+    fn draw_palette(&mut self, frame: &mut Frame, area: Rect) {
+        let palette = self.palette.as_ref().expect("palette is open");
+        let chunks = Layout::vertical([
+            Constraint::Length(3),
+            Constraint::Min(3),
+            Constraint::Length(3),
+        ])
+        .split(area);
+
+        let input = Paragraph::new(format!("> {}", palette.input)).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::Rgb(0, 120, 212)))
+                .title(" Command "),
+        );
+        frame.render_widget(input, chunks[0]);
+        // Park the cursor at the end of the typed text.
+        frame.set_cursor_position((
+            chunks[0].x + 3 + palette.input.len() as u16,
+            chunks[0].y + 1,
+        ));
+
+        let body = Layout::horizontal([Constraint::Percentage(35), Constraint::Percentage(65)])
+            .split(chunks[1]);
+
+        let suggestions = palette.suggestions();
+        let items: Vec<ListItem> = suggestions.iter().map(|s| ListItem::new(*s)).collect();
+        let mut state = ListState::default();
+        if !suggestions.is_empty() {
+            state.select(Some(palette.selected.min(suggestions.len() - 1)));
+        }
+        let list = List::new(items)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(" Suggestions "),
+            )
+            .highlight_style(Style::default().fg(Color::Black).bg(Color::Cyan))
+            .highlight_symbol("➤ ");
+        frame.render_stateful_widget(list, body[0], &mut state);
+
+        let output = if palette.output.is_empty() {
+            "Type a command and press Enter. Tab completes, ↑/↓ pick a suggestion.".to_string()
+        } else {
+            palette.output.clone()
+        };
+        frame.render_widget(
+            Paragraph::new(output)
+                .wrap(Wrap { trim: false })
+                .block(Block::default().borders(Borders::ALL).title(" Output ")),
+            body[1],
+        );
+
+        frame.render_widget(
+            footer("Enter: run   Tab: complete   ↑/↓: pick   Esc: close"),
+            chunks[2],
+        );
     }
 
     fn draw_login(&self, frame: &mut Frame, area: Rect) {
@@ -413,7 +590,7 @@ impl App {
         frame.render_stateful_widget(list, chunks[1], &mut self.subs_state);
 
         frame.render_widget(
-            footer("↑/↓: navigate   Enter: open resources   q: quit"),
+            footer("↑/↓: navigate   Enter: open resources   :: command   q: quit"),
             chunks[2],
         );
     }
@@ -480,7 +657,7 @@ impl App {
 
         frame.render_widget(
             footer(&format!(
-                "Tab: switch   ↑/↓: navigate   r: refresh   b/Esc: back   q: quit   [{}]",
+                "Tab: switch   ↑/↓: nav   r: refresh   :: command   b/Esc: back   q: quit   [{}]",
                 self.message
             )),
             chunks[3],
@@ -489,6 +666,38 @@ impl App {
 }
 
 // ---------------------------------------------------------------- ui helpers
+
+/// Path to the sibling `raz` CLI binary (same directory as this `raz-tui` executable).
+fn raz_binary() -> std::path::PathBuf {
+    let exe = if cfg!(windows) { "raz.exe" } else { "raz" };
+    std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.join(exe)))
+        .unwrap_or_else(|| std::path::PathBuf::from(exe))
+}
+
+/// Execute `raz <input>` and return its combined output. The command shares `~/.raz`, so it
+/// runs against the same logged-in session as the dashboard.
+fn run_raz(input: &str) -> String {
+    let args: Vec<&str> = input.split_whitespace().collect();
+    match std::process::Command::new(raz_binary())
+        .args(&args)
+        .output()
+    {
+        Ok(out) => {
+            let mut text = String::from_utf8_lossy(&out.stdout).into_owned();
+            let err = String::from_utf8_lossy(&out.stderr);
+            if !err.trim().is_empty() {
+                text.push_str(&format!("\n[stderr] {}", err.trim()));
+            }
+            if text.trim().is_empty() {
+                text = format!("(exit {})", out.status.code().unwrap_or(-1));
+            }
+            text
+        }
+        Err(e) => format!("failed to run raz: {e}"),
+    }
+}
 
 fn move_selection(state: &mut ListState, len: usize, delta: i32) {
     if len == 0 {

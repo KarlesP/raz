@@ -7,7 +7,8 @@ command-module design and ships **two front-ends over one core library**:
 
 - **`raz`** — a minimal CLI (`raz login`, `raz logout`, `raz account …`, `raz vnet …`, `raz vm …`).
 - **`raz-tui`** — an interactive [ratatui](https://ratatui.rs) + [tachyonfx](https://github.com/ratatui/tachyonfx)
-  dashboard that browses subscriptions, VMs, and VNets with animated view transitions.
+  dashboard that browses subscriptions, VMs, and VNets with animated view transitions, plus a
+  `:` command palette with autocomplete that runs any raz command and shows its output.
 
 ## Screenshots (raz-tui)
 
