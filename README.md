@@ -17,6 +17,29 @@ command-module design and ships **two front-ends over one core library**:
 |---|---|---|
 | ![raz-tui login screen](docs/screenshots/tui-login.png) | ![raz-tui subscriptions list](docs/screenshots/tui-subscriptions.png) | ![raz-tui VM/VNet explorer](docs/screenshots/tui-resources.png) |
 
+## Benchmarks
+
+`raz` is a single native binary; `az` is a Python application that spins up its interpreter and
+imports a large module tree on **every** invocation. For per-command overhead — everything a CLI
+does around the actual API call — the gap is dramatic.
+
+Median of 7 runs on Windows 10, `az` 2.85.0 vs `raz` 0.1.0 (release build), output discarded:
+
+| Command | raz | az | Speed-up |
+|---|--:|--:|--:|
+| `--version` | 10 ms | 360 ms | **~36×** |
+| `--help` | 9 ms | 264 ms | **~29×** |
+| `account list` (reads local cache) | 12 ms | 472 ms | **~39×** |
+
+> **Network-bound commands converge.** For live ARM reads such as `vm list` / `vnet list`, wall
+> time is dominated by the HTTPS round-trip to Azure (~1 s), so both CLIs land in the same
+> ballpark — but `raz` still trims the ~0.4 s `az` startup off every single call, which adds up
+> fast in scripts and loops.
+
+**Fairness note.** `raz` implements a *slice* of `az` (login, account, vnet/vm `list`/`show`);
+mutating commands (`create`/`delete`/`start`/`stop`) are stubbed. The numbers above compare CLI
+overhead and read paths, not feature parity — `az vm create` has no `raz` equivalent to race.
+
 ## Workspace
 
 ```
