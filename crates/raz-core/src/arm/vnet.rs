@@ -63,6 +63,9 @@ pub async fn show(
 /// it does not already exist.
 pub async fn create(client: &ArmClient, args: &VnetCreate<'_>) -> Result<Value> {
     client
+        .ensure_provider_registered(args.subscription, "Microsoft.Network")
+        .await?;
+    client
         .ensure_resource_group(args.subscription, args.resource_group, args.location)
         .await?;
 

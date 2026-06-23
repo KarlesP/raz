@@ -7,6 +7,7 @@
 //! command modules.
 
 pub mod client;
+pub mod group;
 pub mod vm;
 pub mod vnet;
 

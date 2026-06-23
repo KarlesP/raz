@@ -61,6 +61,11 @@ enum TopCommand {
         #[command(subcommand)]
         command: commands::account::AccountCommand,
     },
+    /// Manage resource groups.
+    Group {
+        #[command(subcommand)]
+        command: commands::group::GroupCommand,
+    },
     /// Manage virtual networks.
     Vnet {
         #[command(subcommand)]
@@ -92,6 +97,7 @@ async fn run(cli: Cli) -> Result<(), RazError> {
         TopCommand::Login(args) => commands::login::run(args, &globals).await,
         TopCommand::Logout => commands::logout::run().await,
         TopCommand::Account { command } => commands::account::run(command, globals).await,
+        TopCommand::Group { command } => commands::group::run(command, globals).await,
         TopCommand::Vnet { command } => commands::vnet::run(command, globals).await,
         TopCommand::Vm { command } => commands::vm::run(command, globals).await,
     }

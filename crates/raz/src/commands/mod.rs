@@ -2,6 +2,7 @@
 //! az's per-module `custom.py`. Shared rendering helpers live here.
 
 pub mod account;
+pub mod group;
 pub mod login;
 pub mod logout;
 pub mod vm;

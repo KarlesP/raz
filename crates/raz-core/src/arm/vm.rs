@@ -85,6 +85,14 @@ pub async fn create(client: &ArmClient, args: &VmCreate<'_>) -> Result<Value> {
         ..
     } = *args;
 
+    // 0. Make sure the providers this command touches are registered (az does this silently).
+    client
+        .ensure_provider_registered(subscription, "Microsoft.Network")
+        .await?;
+    client
+        .ensure_provider_registered(subscription, "Microsoft.Compute")
+        .await?;
+
     // 1. Resource group.
     client
         .ensure_resource_group(subscription, resource_group, location)

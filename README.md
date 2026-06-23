@@ -65,10 +65,14 @@ crates/
 ## Scope (this skeleton)
 
 - **Live:** `login` (OAuth device-code flow against Entra, with az-style cross-tenant
-  subscription discovery), `logout`, `account` (list/show/set/list-tenants), `vnet`/`vm`
-  `list` + `show` (ARM GETs), and **`vnet`/`vm` `create` / `update` / `delete`** — real ARM
-  PUT/DELETE with long-running-operation polling. New resources default to **West Europe**;
-  `vm create` auto-provisions the resource group, virtual network/subnet, and NIC it needs.
+  subscription discovery), `logout`, `account` (list/show/set/list-tenants), `group`
+  (create/list/show/delete), `vnet`/`vm` `list` + `show` (ARM GETs), and **`vnet`/`vm`
+  `create` / `update` / `delete`** — real ARM PUT/DELETE with long-running-operation polling.
+  New resources default to **West Europe**; `vm create` auto-provisions the resource group,
+  virtual network/subnet, and NIC it needs.
+- **Resource-provider auto-registration.** On the first `vnet`/`vm create` in a fresh
+  subscription, raz registers `Microsoft.Network` / `Microsoft.Compute` and waits for them
+  (just like `az` does silently), so create "just works".
 - **Stubbed with explanatory errors:** `vm` `start`/`stop` (action-style long-running
   operations).
 - HTTP uses `reqwest`. A production port would back `arm::client` and the token credential
@@ -98,6 +102,11 @@ raz vnet list -o table             # virtual networks
 raz vm show -g <rg> -n <name>      # single VM as JSON
 raz -s <id|name> vm list           # override subscription for one command
 raz --query "0.name" vm list       # minimal dotted-path projection
+
+# Resource groups
+raz group create -n <rg>                               # defaults to West Europe
+raz group list -o table
+raz group delete -n <rg> --yes                         # cascades to all resources in it
 
 # Create / update / delete (default region: West Europe)
 raz vnet create -g <rg> -n <vnet>                      # 10.0.0.0/16 + default subnet

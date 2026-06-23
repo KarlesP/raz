@@ -18,6 +18,9 @@ const ARM_ENDPOINT: &str = "https://management.azure.com";
 /// Default Azure region for resources raz creates.
 pub const DEFAULT_LOCATION: &str = "westeurope";
 
+/// API version for `Microsoft.Resources` operations (resource groups, provider registration).
+const RESOURCES_API: &str = "2021-04-01";
+
 /// Long-running-operation polling: interval and overall budget.
 const POLL_INTERVAL: Duration = Duration::from_secs(5);
 const POLL_MAX_ATTEMPTS: u32 = 240; // 240 * 5s = 20 min ceiling
@@ -207,7 +210,55 @@ impl ArmClient {
     ) -> Result<Value> {
         let path = format!("/subscriptions/{subscription}/resourcegroups/{resource_group}");
         let body = serde_json::json!({ "location": location });
-        self.put(&path, "2021-04-01", &body).await
+        self.put(&path, RESOURCES_API, &body).await
+    }
+
+    /// Ensure a resource-provider namespace (e.g. `Microsoft.Network`) is registered on the
+    /// subscription, registering and polling to completion if needed. This mirrors what `az`
+    /// does transparently on first use, so `raz` create commands work on fresh subscriptions.
+    pub async fn ensure_provider_registered(
+        &self,
+        subscription: &str,
+        namespace: &str,
+    ) -> Result<()> {
+        let path = format!("/subscriptions/{subscription}/providers/{namespace}");
+        if self.provider_state(&path).await? == "Registered" {
+            return Ok(());
+        }
+
+        // POST .../register (empty body — ARM requires an explicit zero Content-Length).
+        let url = format!("{ARM_ENDPOINT}{path}/register?api-version={RESOURCES_API}");
+        let resp = self
+            .http
+            .post(&url)
+            .bearer_auth(&self.token)
+            .header(reqwest::header::CONTENT_LENGTH, 0)
+            .send()
+            .await?;
+        let status = resp.status();
+        if !status.is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            return Err(map_status(status.as_u16(), &path, body));
+        }
+
+        for _ in 0..POLL_MAX_ATTEMPTS {
+            if self.provider_state(&path).await? == "Registered" {
+                return Ok(());
+            }
+            tokio::time::sleep(POLL_INTERVAL).await;
+        }
+        Err(RazError::Http(format!(
+            "timed out registering resource provider {namespace}"
+        )))
+    }
+
+    async fn provider_state(&self, path: &str) -> Result<String> {
+        let resource = self.get(path, RESOURCES_API).await?;
+        Ok(resource
+            .get("registrationState")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string())
     }
 
     /// Discover the subscriptions the signed-in identity can see. Used by `raz login`.
