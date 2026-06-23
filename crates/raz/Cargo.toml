@@ -20,7 +20,7 @@ extended-description = "raz — a Rust port of a slice of the Azure CLI (login/a
 assets = [
     ["target/release/raz", "usr/bin/", "755"],
     ["target/release/raz-tui", "usr/bin/", "755"],
-    ["README.md", "usr/share/doc/raz/README.md", "644"],
+    ["../../README.md", "usr/share/doc/raz/README.md", "644"],
 ]
 
 [dependencies]
