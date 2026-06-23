@@ -67,16 +67,6 @@ enum Suggestion {
     Flag { token: String, help: String },
 }
 
-impl Suggestion {
-    /// Text shown in the suggestions list.
-    fn label(&self) -> &str {
-        match self {
-            Suggestion::Command { path, .. } => path,
-            Suggestion::Flag { token, .. } => token,
-        }
-    }
-}
-
 /// The `:`-activated command bar: a text input with an editable cursor and the output of the
 /// last executed command. Suggestions are computed by the owning [`App`] from its schema.
 struct Palette {
@@ -233,11 +223,12 @@ impl App {
             .block_on(device_code::request_device_code(&self.http, &tenant))
         {
             Ok(device) => {
+                device_code::open_verification(&device);
                 let interval = device.interval.max(1);
                 self.login = Some(LoginState {
                     next_poll: Instant::now() + StdDuration::from_secs(interval),
                     interval,
-                    status: "Waiting for you to complete sign-in in the browser...".to_string(),
+                    status: "Browser opened — enter the code to finish signing in…".to_string(),
                     device,
                 });
             }
@@ -526,27 +517,55 @@ impl App {
         }
     }
 
-    /// Run the typed command on a background thread so the UI stays responsive. The result is
-    /// collected in [`App::tick`]. Ignored while a command is already in flight.
+    /// Run the palette's typed command (background; result collected in [`App::tick`]).
     fn run_palette_command(&mut self) {
-        if self.cmd_rx.is_some() {
-            return;
-        }
         let input = match &self.palette {
             Some(p) => p.input.trim().to_string(),
             None => return,
         };
-        if input.is_empty() {
+        self.spawn_command(input);
+    }
+
+    /// Run `raz <input>` on a background thread so the UI stays responsive; the result is
+    /// collected in [`App::tick`]. Ignored while a command is already in flight.
+    fn spawn_command(&mut self, input: String) {
+        if self.cmd_rx.is_some() || input.is_empty() {
             return;
         }
-        if let Some(p) = self.palette.as_mut() {
-            p.output = format!("Running `raz {input}`…");
+        let running = format!("Running `raz {input}`…");
+        match self.palette.as_mut() {
+            Some(p) => p.output = running,
+            None => self.message = running,
         }
         let (tx, rx) = std::sync::mpsc::channel();
         self.cmd_rx = Some(rx);
         std::thread::spawn(move || {
             let _ = tx.send(run_raz(&input));
         });
+    }
+
+    /// Run a power action on the currently-selected VM (VMs tab) via the background runner.
+    fn vm_power_action(&mut self, action: &str) {
+        if self.res_tab != ResTab::Vms {
+            return;
+        }
+        let sub = match self.selected_subscription() {
+            Some(s) => s.id.clone(),
+            None => return,
+        };
+        let vm = self
+            .res_state
+            .selected()
+            .and_then(|i| self.current_list().get(i));
+        let (Some(name), Some(rg)) = (
+            vm.and_then(|v| v.get("name")).and_then(Value::as_str),
+            vm.and_then(|v| v.get("resourceGroup"))
+                .and_then(Value::as_str),
+        ) else {
+            return;
+        };
+        let input = format!("vm {action} -g {rg} -n {name} -s {sub}");
+        self.spawn_command(input);
     }
 
     fn handle_subscriptions_key(&mut self, code: KeyCode) {
@@ -578,6 +597,8 @@ impl App {
             }
             KeyCode::Esc | KeyCode::Char('b') => self.goto_subscriptions(),
             KeyCode::Char('r') => self.load_resources(),
+            KeyCode::Char('s') => self.vm_power_action("start"),
+            KeyCode::Char('x') => self.vm_power_action("stop"),
             _ => {}
         }
     }
@@ -587,13 +608,17 @@ impl App {
     /// Per-frame background work: poll the device-code token endpoint while on the login
     /// screen.
     pub fn tick(&mut self) {
-        // Collect the result of a background palette command, if one just finished.
+        // Collect the result of a background command, if one just finished. Route it to the
+        // palette output when open, else to the status line (first line, trimmed).
         if let Some(rx) = &self.cmd_rx {
             if let Ok(output) = rx.try_recv() {
-                if let Some(p) = self.palette.as_mut() {
-                    p.output = output;
-                }
                 self.cmd_rx = None;
+                match self.palette.as_mut() {
+                    Some(p) => p.output = output,
+                    None => {
+                        self.message = output.lines().next().unwrap_or("done").trim().to_string();
+                    }
+                }
                 if self.selected_subscription().is_some() {
                     self.load_resources();
                 }
@@ -709,19 +734,43 @@ impl App {
         let body = Layout::horizontal([Constraint::Percentage(40), Constraint::Percentage(60)])
             .split(chunks[2]);
 
-        let items: Vec<ListItem> = suggestions
-            .iter()
-            .map(|s| ListItem::new(s.label()))
-            .collect();
-        let mut state = ListState::default();
-        if !suggestions.is_empty() {
-            state.select(Some(selected));
+        // Command suggestions are grouped under a per-service header (account/ad/group/vm/vnet)
+        // and shown without the service prefix; flag suggestions stay flat. Headers are not
+        // selectable, so `state` is pointed at the selected item's *display* row.
+        let flag_mode = self.matched_command().is_some();
+        let mut items: Vec<ListItem> = Vec::new();
+        let mut selected_row: Option<usize> = None;
+        let mut current_service = "";
+        let header_style = Style::default()
+            .fg(Color::Rgb(0, 120, 212))
+            .add_modifier(Modifier::BOLD);
+        for (i, s) in suggestions.iter().enumerate() {
+            let label = match s {
+                Suggestion::Command { path, .. } => {
+                    if !flag_mode {
+                        let service = path.split(' ').next().unwrap_or("");
+                        if service != current_service {
+                            current_service = service;
+                            items.push(
+                                ListItem::new(format!("{}:", service.to_uppercase()))
+                                    .style(header_style),
+                            );
+                        }
+                    }
+                    // Show the sub-command (drop the service word) under its header.
+                    let sub = path.strip_prefix(current_service).unwrap_or(path).trim();
+                    format!("  {sub}")
+                }
+                Suggestion::Flag { token, .. } => token.clone(),
+            };
+            if i == selected {
+                selected_row = Some(items.len());
+            }
+            items.push(ListItem::new(label));
         }
-        let title = if self.matched_command().is_some() {
-            " Flags "
-        } else {
-            " Commands "
-        };
+        let mut state = ListState::default();
+        state.select(selected_row);
+        let title = if flag_mode { " Flags " } else { " Commands " };
         let list = List::new(items)
             .block(Block::default().borders(Borders::ALL).title(title))
             .highlight_style(Style::default().fg(Color::Black).bg(Color::Cyan))
@@ -895,7 +944,7 @@ impl App {
 
         frame.render_widget(
             footer(&format!(
-                "Tab: switch   ↑/↓: nav   r: refresh   :: command   b/Esc: back   q: quit   [{}]",
+                "Tab: switch   ↑/↓: nav   s: start   x: stop   r: refresh   :: command   b/Esc: back   q: quit   [{}]",
                 self.message
             )),
             chunks[3],

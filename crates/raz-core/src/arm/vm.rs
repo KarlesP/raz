@@ -1,7 +1,7 @@
 //! Virtual machine operations (az `vm`). `create` orchestrates the resources a VM needs
 //! (resource group, virtual network + subnet, NIC) then the VM, defaulting to West Europe
 //! and a small Ubuntu image. `update` patches size/tags; `delete` removes the VM.
-//! `start`/`stop` are not yet implemented (they are action-style long-running operations).
+//! `start`/`stop`/`restart`/`deallocate` POST the VM power actions and poll the operation.
 
 use serde_json::{json, Value};
 
@@ -306,12 +306,39 @@ pub async fn delete(
     client.wait_deleted(&path, API_VERSION).await
 }
 
-/// `raz vm start` — not yet implemented (POST `/start`, then poll the operation).
-pub async fn start(_name: &str) -> Result<Value> {
-    Err(RazError::NotImplemented("vm start".into()))
+/// Power actions: POST the VM action endpoint and wait for the long-running op to finish.
+async fn power_action(
+    client: &ArmClient,
+    subscription: &str,
+    resource_group: &str,
+    name: &str,
+    action: &str,
+) -> Result<()> {
+    let path = format!("{}/{action}", vm_path(subscription, resource_group, name));
+    client.post_action(&path, API_VERSION).await
 }
 
-/// `raz vm stop` — not yet implemented (POST `/powerOff`, then poll the operation).
-pub async fn stop(_name: &str) -> Result<Value> {
-    Err(RazError::NotImplemented("vm stop".into()))
+/// `raz vm start`.
+pub async fn start(client: &ArmClient, subscription: &str, rg: &str, name: &str) -> Result<()> {
+    power_action(client, subscription, rg, name, "start").await
+}
+
+/// `raz vm stop` — power off (still billed for the allocation; use `deallocate` to stop billing).
+pub async fn stop(client: &ArmClient, subscription: &str, rg: &str, name: &str) -> Result<()> {
+    power_action(client, subscription, rg, name, "powerOff").await
+}
+
+/// `raz vm restart`.
+pub async fn restart(client: &ArmClient, subscription: &str, rg: &str, name: &str) -> Result<()> {
+    power_action(client, subscription, rg, name, "restart").await
+}
+
+/// `raz vm deallocate` — stop and release the compute (stops compute billing).
+pub async fn deallocate(
+    client: &ArmClient,
+    subscription: &str,
+    rg: &str,
+    name: &str,
+) -> Result<()> {
+    power_action(client, subscription, rg, name, "deallocate").await
 }

@@ -106,6 +106,7 @@ async fn device_code_login(
 
     let token = device_code::run_flow(http, &tenant, |dc| {
         println!("{}", dc.message);
+        device_code::open_verification(dc);
     })
     .await?;
     Ok((tenant, token))

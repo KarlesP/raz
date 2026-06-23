@@ -23,6 +23,7 @@ thiserror = "1"
 clap = { version = "4", features = ["derive", "env"] }
 comfy-table = "7"
 dirs = "5"
+open = "5"
 
 # TUI stack
 ratatui = "0.29"
