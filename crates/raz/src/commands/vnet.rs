@@ -68,7 +68,7 @@ pub async fn run(command: VnetCommand, globals: GlobalArgs) -> Result<()> {
         VnetCommand::List => {
             let (ctx, client, sub) = arm_context(globals).await?;
             let value = vnet::list(&client, &sub).await?;
-            emit(&ctx, value, Some(&vnet::table_spec()))
+            emit(&ctx, value, Some(&raz_core::arm::resource_table_spec()))
         }
         VnetCommand::Show {
             resource_group,
@@ -76,7 +76,7 @@ pub async fn run(command: VnetCommand, globals: GlobalArgs) -> Result<()> {
         } => {
             let (ctx, client, sub) = arm_context(globals).await?;
             let value = vnet::show(&client, &sub, &resource_group, &name).await?;
-            emit(&ctx, value, Some(&vnet::table_spec()))
+            emit(&ctx, value, Some(&raz_core::arm::resource_table_spec()))
         }
         VnetCommand::Create {
             resource_group,
@@ -101,7 +101,7 @@ pub async fn run(command: VnetCommand, globals: GlobalArgs) -> Result<()> {
                 },
             )
             .await?;
-            emit(&ctx, value, Some(&vnet::table_spec()))
+            emit(&ctx, value, Some(&raz_core::arm::resource_table_spec()))
         }
         VnetCommand::Update {
             resource_group,
@@ -120,7 +120,7 @@ pub async fn run(command: VnetCommand, globals: GlobalArgs) -> Result<()> {
                 add_prefix.as_deref(),
             )
             .await?;
-            emit(&ctx, value, Some(&vnet::table_spec()))
+            emit(&ctx, value, Some(&raz_core::arm::resource_table_spec()))
         }
         VnetCommand::Delete {
             resource_group,

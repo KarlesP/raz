@@ -16,7 +16,7 @@ use tokio::runtime::Runtime;
 use raz_core::arm::client::{discover_all, ArmClient};
 use raz_core::arm::{vm, vnet};
 use raz_core::auth::device_code::{self, DeviceCodeResponse, PollOutcome};
-use raz_core::auth::{credential, now_unix};
+use raz_core::auth::{cache_from_response, now_unix};
 use raz_core::config::{Profile, Subscription};
 use raz_core::context::new_http_client;
 
@@ -327,7 +327,7 @@ impl App {
 
     fn complete_login(&mut self, token: device_code::TokenResponse, tenant: String) {
         self.profile.tenant_id = Some(tenant);
-        self.profile.token = Some(credential::cache_from_response(&token));
+        self.profile.token = Some(cache_from_response(&token));
         let _ = self.profile.save();
 
         // Cross-tenant discovery, same as the CLI's `raz login`.

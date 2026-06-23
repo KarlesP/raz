@@ -4,7 +4,7 @@
 use clap::Args;
 
 use raz_core::arm::client::discover_all;
-use raz_core::auth::{credential, device_code};
+use raz_core::auth::{cache_from_response, device_code};
 use raz_core::config::Profile;
 use raz_core::context::new_http_client;
 use raz_core::error::Result;
@@ -40,7 +40,7 @@ pub async fn run(args: LoginArgs, _globals: &GlobalArgs) -> Result<()> {
 
     // Persist the token first so it can be reused for discovery and later commands.
     profile.tenant_id = Some(tenant);
-    profile.token = Some(credential::cache_from_response(&token));
+    profile.token = Some(cache_from_response(&token));
     profile.save()?;
 
     // Step 3: enumerate every tenant the identity can reach and the subscriptions in each

@@ -29,12 +29,12 @@ pub enum AccountCommand {
 }
 
 fn subscription_table() -> TableSpec {
-    TableSpec::new(vec![
+    vec![
         ("Name", "name"),
         ("SubscriptionId", "id"),
         ("Default", "is_default"),
         ("TenantId", "tenant_id"),
-    ])
+    ]
 }
 
 pub async fn run(command: AccountCommand, globals: GlobalArgs) -> Result<()> {
@@ -62,11 +62,7 @@ pub async fn run(command: AccountCommand, globals: GlobalArgs) -> Result<()> {
                 }
             }
             let value = Value::Array(seen.into_iter().map(|t| json!({ "tenantId": t })).collect());
-            emit(
-                &ctx,
-                value,
-                Some(&TableSpec::new(vec![("TenantId", "tenantId")])),
-            )
+            emit(&ctx, value, Some(&vec![("TenantId", "tenantId")]))
         }
         AccountCommand::Set { subscription } => set_default(subscription),
     }

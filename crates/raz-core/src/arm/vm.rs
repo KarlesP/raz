@@ -7,7 +7,6 @@ use serde_json::{json, Value};
 
 use super::client::ArmClient;
 use crate::error::{usage, RazError, Result};
-use crate::output::TableSpec;
 
 const API_VERSION: &str = "2024-07-01";
 const NETWORK_API: &str = "2023-09-01";
@@ -35,20 +34,11 @@ pub struct VmCreate<'a> {
     pub admin_password: Option<&'a str>,
 }
 
-/// Columns shown in `--output table`, matching az's vm table shape.
-pub fn table_spec() -> TableSpec {
-    TableSpec::new(vec![
-        ("Name", "name"),
-        ("ResourceGroup", "resourceGroup"),
-        ("Location", "location"),
-    ])
-}
-
 /// `raz vm list` — all virtual machines in the subscription.
 pub async fn list(client: &ArmClient, subscription: &str) -> Result<Value> {
     let path = format!("/subscriptions/{subscription}/providers/{PROVIDER}");
     let body = client.get(&path, API_VERSION).await?;
-    Ok(normalize_list(body))
+    Ok(super::enrich_list(body))
 }
 
 /// `raz vm show -g <rg> -n <name>` — a single virtual machine.
@@ -269,16 +259,4 @@ pub async fn start(_name: &str) -> Result<Value> {
 /// `raz vm stop` — not yet implemented (POST `/powerOff`, then poll the operation).
 pub async fn stop(_name: &str) -> Result<Value> {
     Err(RazError::NotImplemented("vm stop".into()))
-}
-
-fn normalize_list(body: Value) -> Value {
-    let mut items = body
-        .get("value")
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default();
-    for item in &mut items {
-        super::enrich_resource(item);
-    }
-    Value::Array(items)
 }

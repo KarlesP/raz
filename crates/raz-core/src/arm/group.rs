@@ -17,7 +17,7 @@ fn group_path(subscription: &str, name: &str) -> String {
 
 /// Columns shown in `--output table`.
 pub fn table_spec() -> TableSpec {
-    TableSpec::new(vec![("Name", "name"), ("Location", "location")])
+    vec![("Name", "name"), ("Location", "location")]
 }
 
 /// `raz group create -n <name> -l <location>` — create (or update) a resource group.

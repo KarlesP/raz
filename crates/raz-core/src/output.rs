@@ -33,18 +33,8 @@ impl FromStr for OutputFormat {
     }
 }
 
-/// A description of how to render a value as a table: column header -> JSON pointer-ish key.
-/// Keys are looked up as top-level object fields on each row.
-#[derive(Debug, Clone)]
-pub struct TableSpec {
-    pub columns: Vec<(&'static str, &'static str)>,
-}
-
-impl TableSpec {
-    pub fn new(columns: Vec<(&'static str, &'static str)>) -> Self {
-        Self { columns }
-    }
-}
+/// Table layout: ordered `(column header, top-level JSON key)` pairs looked up on each row.
+pub type TableSpec = Vec<(&'static str, &'static str)>;
 
 /// Render `value` in the requested format. `table` is consulted for table/tsv modes;
 /// when absent we fall back to pretty JSON so no command is ever unprintable.
@@ -82,14 +72,9 @@ fn cell(row: &Value, key: &str) -> String {
 fn render_table(value: &Value, spec: &TableSpec) -> String {
     let mut table = Table::new();
     table.load_preset(UTF8_FULL);
-    table.set_header(spec.columns.iter().map(|(h, _)| *h).collect::<Vec<_>>());
+    table.set_header(spec.iter().map(|(h, _)| *h).collect::<Vec<_>>());
     for row in rows(value) {
-        table.add_row(
-            spec.columns
-                .iter()
-                .map(|(_, k)| cell(row, k))
-                .collect::<Vec<_>>(),
-        );
+        table.add_row(spec.iter().map(|(_, k)| cell(row, k)).collect::<Vec<_>>());
     }
     table.to_string()
 }
@@ -98,8 +83,7 @@ fn render_tsv(value: &Value, spec: &TableSpec) -> String {
     rows(value)
         .iter()
         .map(|row| {
-            spec.columns
-                .iter()
+            spec.iter()
                 .map(|(_, k)| cell(row, k))
                 .collect::<Vec<_>>()
                 .join("\t")
@@ -140,7 +124,7 @@ mod tests {
     use serde_json::json;
 
     fn spec() -> TableSpec {
-        TableSpec::new(vec![("Name", "name"), ("Location", "location")])
+        vec![("Name", "name"), ("Location", "location")]
     }
 
     #[test]

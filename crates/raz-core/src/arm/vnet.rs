@@ -5,7 +5,6 @@ use serde_json::{json, Value};
 
 use super::client::ArmClient;
 use crate::error::Result;
-use crate::output::TableSpec;
 
 const API_VERSION: &str = "2023-09-01";
 const PROVIDER: &str = "Microsoft.Network/virtualNetworks";
@@ -27,20 +26,11 @@ pub struct VnetCreate<'a> {
     pub subnet_prefix: &'a str,
 }
 
-/// Columns shown in `--output table`, matching az's vnet table shape.
-pub fn table_spec() -> TableSpec {
-    TableSpec::new(vec![
-        ("Name", "name"),
-        ("ResourceGroup", "resourceGroup"),
-        ("Location", "location"),
-    ])
-}
-
 /// `raz vnet list` — all virtual networks in the subscription.
 pub async fn list(client: &ArmClient, subscription: &str) -> Result<Value> {
     let path = format!("/subscriptions/{subscription}/providers/{PROVIDER}");
     let body = client.get(&path, API_VERSION).await?;
-    Ok(normalize_list(body))
+    Ok(super::enrich_list(body))
 }
 
 /// `raz vnet show -g <rg> -n <name>` — a single virtual network.
@@ -143,18 +133,4 @@ pub async fn delete(
     let path = resource_path(subscription, resource_group, name);
     client.delete(&path, API_VERSION).await?;
     client.wait_deleted(&path, API_VERSION).await
-}
-
-/// Flatten an ARM `{ "value": [...] }` list into an array, enriching each item with a
-/// `resourceGroup` field parsed from its id (az surfaces this derived field too).
-fn normalize_list(body: Value) -> Value {
-    let mut items = body
-        .get("value")
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default();
-    for item in &mut items {
-        super::enrich_resource(item);
-    }
-    Value::Array(items)
 }

@@ -36,16 +36,6 @@ impl Context {
         })
     }
 
-    /// A non-expired cached bearer token, else [`RazError::NotLoggedIn`]. Used only as the
-    /// fallback when there is no refresh token to mint a tenant-scoped token from.
-    pub fn access_token(&self) -> Result<String> {
-        let now = crate::auth::now_unix();
-        match &self.profile.token {
-            Some(tok) if !tok.is_expired(now, 60) => Ok(tok.access_token.clone()),
-            _ => Err(RazError::NotLoggedIn),
-        }
-    }
-
     /// The subscription this invocation targets: the `--subscription` match (by id or name)
     /// else the profile default.
     pub fn active_subscription(&self) -> Option<&crate::config::Subscription> {
@@ -95,6 +85,10 @@ impl Context {
                 return Ok(tok.access_token);
             }
         }
-        self.access_token()
+        if cached.is_expired(crate::auth::now_unix(), 60) {
+            Err(RazError::NotLoggedIn)
+        } else {
+            Ok(cached.access_token.clone())
+        }
     }
 }

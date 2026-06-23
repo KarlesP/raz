@@ -80,7 +80,7 @@ pub async fn run(command: VmCommand, globals: GlobalArgs) -> Result<()> {
         VmCommand::List => {
             let (ctx, client, sub) = arm_context(globals).await?;
             let value = vm::list(&client, &sub).await?;
-            emit(&ctx, value, Some(&vm::table_spec()))
+            emit(&ctx, value, Some(&raz_core::arm::resource_table_spec()))
         }
         VmCommand::Show {
             resource_group,
@@ -88,7 +88,7 @@ pub async fn run(command: VmCommand, globals: GlobalArgs) -> Result<()> {
         } => {
             let (ctx, client, sub) = arm_context(globals).await?;
             let value = vm::show(&client, &sub, &resource_group, &name).await?;
-            emit(&ctx, value, Some(&vm::table_spec()))
+            emit(&ctx, value, Some(&raz_core::arm::resource_table_spec()))
         }
         VmCommand::Create {
             resource_group,
@@ -115,7 +115,7 @@ pub async fn run(command: VmCommand, globals: GlobalArgs) -> Result<()> {
                 },
             )
             .await?;
-            emit(&ctx, value, Some(&vm::table_spec()))
+            emit(&ctx, value, Some(&raz_core::arm::resource_table_spec()))
         }
         VmCommand::Update {
             resource_group,
@@ -134,7 +134,7 @@ pub async fn run(command: VmCommand, globals: GlobalArgs) -> Result<()> {
                 &tags,
             )
             .await?;
-            emit(&ctx, value, Some(&vm::table_spec()))
+            emit(&ctx, value, Some(&raz_core::arm::resource_table_spec()))
         }
         VmCommand::Delete {
             resource_group,

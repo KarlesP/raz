@@ -6,11 +6,34 @@ pub mod group;
 pub mod vm;
 pub mod vnet;
 
+use crate::output::TableSpec;
 use serde_json::Value;
 
+/// Table layout shared by VM and VNet listings (and any resource carrying a resource group).
+pub fn resource_table_spec() -> TableSpec {
+    vec![
+        ("Name", "name"),
+        ("ResourceGroup", "resourceGroup"),
+        ("Location", "location"),
+    ]
+}
+
+/// Flatten an ARM `{ "value": [...] }` list into a JSON array, enriching each item with its
+/// derived `resourceGroup`.
+pub(crate) fn enrich_list(body: Value) -> Value {
+    let mut items = body
+        .get("value")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    for item in &mut items {
+        enrich_resource(item);
+    }
+    Value::Array(items)
+}
+
 /// Add a derived `resourceGroup` field to an ARM resource object by parsing its `id`
-/// (`/subscriptions/{s}/resourceGroups/{rg}/...`). az exposes this same convenience field;
-/// it makes table output useful and is harmless in JSON output.
+/// (`/subscriptions/{s}/resourceGroups/{rg}/...`), matching the convenience field az exposes.
 pub(crate) fn enrich_resource(item: &mut Value) {
     let rg = item
         .get("id")
