@@ -4,6 +4,7 @@
 //! (`rt.block_on(...)`), which keeps the render/event loop simple while reusing the exact
 //! same auth/ARM code the CLI uses. tachyonfx effects are added on every view transition.
 
+use std::sync::mpsc::Receiver;
 use std::time::{Duration as StdDuration, Instant};
 
 use ratatui::crossterm::event::KeyCode;
@@ -42,27 +43,106 @@ struct LoginState {
     status: String,
 }
 
-/// Command names offered by the palette's autocomplete. Session commands (login/logout) are
-/// omitted — the TUI owns the session via its login gate.
-const COMMANDS: &[&str] = &[
-    "account list",
-    "account show",
-    "account set",
-    "account list-tenants",
-    "group list",
-    "group show",
-    "group create",
-    "group delete",
-    "vnet list",
-    "vnet show",
-    "vnet create",
-    "vnet update",
-    "vnet delete",
-    "vm list",
-    "vm show",
-    "vm create",
-    "vm update",
-    "vm delete",
+/// A palette-offered command: its name, the arguments it accepts, and a one-line description.
+struct CommandInfo {
+    name: &'static str,
+    args: &'static str,
+    help: &'static str,
+}
+
+/// Commands offered by the palette autocomplete. Session commands (login/logout) are omitted —
+/// the TUI owns the session via its login gate.
+const COMMANDS: &[CommandInfo] = &[
+    CommandInfo {
+        name: "account list",
+        args: "",
+        help: "List subscriptions across all tenants.",
+    },
+    CommandInfo {
+        name: "account show",
+        args: "",
+        help: "Show the active subscription.",
+    },
+    CommandInfo {
+        name: "account set",
+        args: "-s <id|name>",
+        help: "Set the active subscription (persisted to ~/.raz).",
+    },
+    CommandInfo {
+        name: "account list-tenants",
+        args: "",
+        help: "List the tenants the cached subscriptions belong to.",
+    },
+    CommandInfo {
+        name: "group list",
+        args: "",
+        help: "List resource groups.",
+    },
+    CommandInfo {
+        name: "group show",
+        args: "-n <name>",
+        help: "Show one resource group.",
+    },
+    CommandInfo {
+        name: "group create",
+        args: "-n <name> [-l <location>]",
+        help: "Create a resource group (default West Europe).",
+    },
+    CommandInfo {
+        name: "group delete",
+        args: "-n <name> --yes",
+        help: "Delete a resource group and everything in it.",
+    },
+    CommandInfo {
+        name: "vnet list",
+        args: "",
+        help: "List virtual networks.",
+    },
+    CommandInfo {
+        name: "vnet show",
+        args: "-g <rg> -n <name>",
+        help: "Show one virtual network.",
+    },
+    CommandInfo {
+        name: "vnet create",
+        args: "-g <rg> -n <name> [-l <loc>] [--address-prefix <cidr>]",
+        help: "Create a vnet with a default subnet.",
+    },
+    CommandInfo {
+        name: "vnet update",
+        args: "-g <rg> -n <name> [--tag k=v] [--add-prefix <cidr>]",
+        help: "Update vnet tags / address space.",
+    },
+    CommandInfo {
+        name: "vnet delete",
+        args: "-g <rg> -n <name>",
+        help: "Delete a virtual network.",
+    },
+    CommandInfo {
+        name: "vm list",
+        args: "",
+        help: "List virtual machines.",
+    },
+    CommandInfo {
+        name: "vm show",
+        args: "-g <rg> -n <name>",
+        help: "Show one virtual machine.",
+    },
+    CommandInfo {
+        name: "vm create",
+        args: "-g <rg> -n <name> (--ssh-key-value <k> | --admin-password <p>) [--size <sku>]",
+        help: "Create a Linux VM (Ubuntu, West Europe, B1s).",
+    },
+    CommandInfo {
+        name: "vm update",
+        args: "-g <rg> -n <name> [--size <sku>] [--tag k=v]",
+        help: "Resize and/or retag a VM.",
+    },
+    CommandInfo {
+        name: "vm delete",
+        args: "-g <rg> -n <name>",
+        help: "Delete a virtual machine.",
+    },
 ];
 
 /// The `:`-activated command bar: a text input, prefix-autocomplete over [`COMMANDS`], and the
@@ -74,12 +154,13 @@ struct Palette {
 }
 
 impl Palette {
-    fn suggestions(&self) -> Vec<&'static str> {
+    /// Commands matching the current input: those whose name the input is completing, plus the
+    /// command the input has already completed (so its usage stays visible while typing args).
+    fn suggestions(&self) -> Vec<&'static CommandInfo> {
         let q = self.input.trim_start();
         COMMANDS
             .iter()
-            .copied()
-            .filter(|c| c.starts_with(q))
+            .filter(|c| c.name.starts_with(q) || q.starts_with(c.name))
             .collect()
     }
 }
@@ -101,6 +182,8 @@ pub struct App {
     message: String,
 
     palette: Option<Palette>,
+    /// Receiver for an in-flight palette command running on a background thread.
+    cmd_rx: Option<Receiver<String>>,
     effects: EffectManager<()>,
 }
 
@@ -136,6 +219,7 @@ impl App {
             res_state: ListState::default(),
             message: String::new(),
             palette: None,
+            cmd_rx: None,
             effects: EffectManager::default(),
         };
 
@@ -315,7 +399,7 @@ impl App {
             KeyCode::Tab => {
                 let suggestions = palette.suggestions();
                 if let Some(choice) = suggestions.get(palette.selected) {
-                    palette.input = format!("{choice} ");
+                    palette.input = format!("{} ", choice.name);
                     palette.selected = 0;
                 }
             }
@@ -343,9 +427,12 @@ impl App {
         }
     }
 
-    /// Run the typed command by invoking the sibling `raz` binary and capturing its output,
-    /// then refresh the cached resource lists in case the command mutated something.
+    /// Run the typed command on a background thread so the UI stays responsive. The result is
+    /// collected in [`App::tick`]. Ignored while a command is already in flight.
     fn run_palette_command(&mut self) {
+        if self.cmd_rx.is_some() {
+            return;
+        }
         let input = match &self.palette {
             Some(p) => p.input.trim().to_string(),
             None => return,
@@ -353,13 +440,14 @@ impl App {
         if input.is_empty() {
             return;
         }
-        let output = run_raz(&input);
         if let Some(p) = self.palette.as_mut() {
-            p.output = output;
+            p.output = format!("Running `raz {input}`…");
         }
-        if self.selected_subscription().is_some() {
-            self.load_resources();
-        }
+        let (tx, rx) = std::sync::mpsc::channel();
+        self.cmd_rx = Some(rx);
+        std::thread::spawn(move || {
+            let _ = tx.send(run_raz(&input));
+        });
     }
 
     fn handle_subscriptions_key(&mut self, code: KeyCode) {
@@ -400,6 +488,19 @@ impl App {
     /// Per-frame background work: poll the device-code token endpoint while on the login
     /// screen.
     pub fn tick(&mut self) {
+        // Collect the result of a background palette command, if one just finished.
+        if let Some(rx) = &self.cmd_rx {
+            if let Ok(output) = rx.try_recv() {
+                if let Some(p) = self.palette.as_mut() {
+                    p.output = output;
+                }
+                self.cmd_rx = None;
+                if self.selected_subscription().is_some() {
+                    self.load_resources();
+                }
+            }
+        }
+
         if !matches!(self.view, View::Login) {
             return;
         }
@@ -477,9 +578,10 @@ impl App {
     fn draw_palette(&mut self, frame: &mut Frame, area: Rect) {
         let palette = self.palette.as_ref().expect("palette is open");
         let chunks = Layout::vertical([
-            Constraint::Length(3),
-            Constraint::Min(3),
-            Constraint::Length(3),
+            Constraint::Length(3), // input
+            Constraint::Length(4), // usage of the selected command
+            Constraint::Min(3),    // commands + output
+            Constraint::Length(3), // footer
         ])
         .split(area);
 
@@ -490,33 +592,43 @@ impl App {
                 .title(" Command "),
         );
         frame.render_widget(input, chunks[0]);
-        // Park the cursor at the end of the typed text.
         frame.set_cursor_position((
             chunks[0].x + 3 + palette.input.len() as u16,
             chunks[0].y + 1,
         ));
 
-        let body = Layout::horizontal([Constraint::Percentage(35), Constraint::Percentage(65)])
-            .split(chunks[1]);
-
         let suggestions = palette.suggestions();
-        let items: Vec<ListItem> = suggestions.iter().map(|s| ListItem::new(*s)).collect();
+        let selected = palette.selected.min(suggestions.len().saturating_sub(1));
+
+        // Usage line + description for the highlighted command, so the user sees the exact
+        // parameters to type next.
+        let usage = match suggestions.get(selected) {
+            Some(c) => format!("raz {} {}\n{}", c.name, c.args, c.help),
+            None => "No matching command.".to_string(),
+        };
+        frame.render_widget(
+            Paragraph::new(usage)
+                .wrap(Wrap { trim: true })
+                .block(Block::default().borders(Borders::ALL).title(" Usage ")),
+            chunks[1],
+        );
+
+        let body = Layout::horizontal([Constraint::Percentage(40), Constraint::Percentage(60)])
+            .split(chunks[2]);
+
+        let items: Vec<ListItem> = suggestions.iter().map(|c| ListItem::new(c.name)).collect();
         let mut state = ListState::default();
         if !suggestions.is_empty() {
-            state.select(Some(palette.selected.min(suggestions.len() - 1)));
+            state.select(Some(selected));
         }
         let list = List::new(items)
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .title(" Suggestions "),
-            )
+            .block(Block::default().borders(Borders::ALL).title(" Commands "))
             .highlight_style(Style::default().fg(Color::Black).bg(Color::Cyan))
             .highlight_symbol("➤ ");
         frame.render_stateful_widget(list, body[0], &mut state);
 
         let output = if palette.output.is_empty() {
-            "Type a command and press Enter. Tab completes, ↑/↓ pick a suggestion.".to_string()
+            "Tab completes the selected command, then add the arguments shown above.".to_string()
         } else {
             palette.output.clone()
         };
@@ -529,7 +641,7 @@ impl App {
 
         frame.render_widget(
             footer("Enter: run   Tab: complete   ↑/↓: pick   Esc: close"),
-            chunks[2],
+            chunks[3],
         );
     }
 
