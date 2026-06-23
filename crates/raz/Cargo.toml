@@ -10,6 +10,19 @@ description = "raz — a Rust port of a slice of the Azure CLI (login/logout/vne
 name = "raz"
 path = "src/main.rs"
 
+# Debian package (cargo-deb) — ships both workspace binaries in one .deb.
+[package.metadata.deb]
+maintainer = "KarlesP <karles.panagiotis@gmail.com>"
+section = "utils"
+priority = "optional"
+depends = "$auto"
+extended-description = "raz — a Rust port of a slice of the Azure CLI (login/account/group/vnet/vm), plus the raz-tui dashboard."
+assets = [
+    ["target/release/raz", "usr/bin/", "755"],
+    ["target/release/raz-tui", "usr/bin/", "755"],
+    ["README.md", "usr/share/doc/raz/README.md", "644"],
+]
+
 [dependencies]
 raz-core = { workspace = true }
 tokio = { workspace = true }

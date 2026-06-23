@@ -1,8 +1,8 @@
 name: Build (release)
 
-# Manual only — never triggered on push. Builds the optimized binaries for raz + raz-tui on
-# Linux and Windows, uploads them as artifacts, then publishes a GitHub Release tagged from
-# the root VERSION file.
+# Manual only — never triggered on push. Gates on tests, then builds installers
+# (Windows .msi via cargo-wix, Linux .deb via cargo-deb) plus raw binaries, and publishes a
+# GitHub Release tagged from the root VERSION file.
 on:
   workflow_dispatch:
 
@@ -10,60 +10,105 @@ permissions:
   contents: write
 
 jobs:
-  build:
-    name: Build release (${{ matrix.label }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            label: linux-x86_64
-            ext: ""
-          - os: windows-latest
-            label: windows-x86_64
-            ext: ".exe"
-
+  test:
+    name: Test gate
+    runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo test
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache cargo + target
-        uses: Swatinem/rust-cache@v2
+  linux:
+    name: Linux (.deb)
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
 
       - name: Build release binaries
         run: cargo build --release --bins
+
+      - name: Install cargo-deb
+        run: cargo install cargo-deb --locked
+
+      - name: Build .deb (bundles raz + raz-tui)
+        run: cargo deb -p raz --no-build
+
+      - name: Stage artifacts
+        run: |
+          mkdir -p dist
+          cp target/debian/*.deb dist/
+          cp target/release/raz       dist/raz-linux-x86_64
+          cp target/release/raz-tui   dist/raz-tui-linux-x86_64
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: raz-linux
+          path: dist/*
+
+  windows:
+    name: Windows (.msi)
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build release binaries
+        run: cargo build --release --bins
+
+      - name: Install WiX Toolset v3
+        shell: pwsh
+        run: |
+          choco install wixtoolset --no-progress -y
+          $wix = (Get-ChildItem "C:\Program Files (x86)\WiX Toolset*\bin\candle.exe" -ErrorAction SilentlyContinue | Select-Object -First 1).DirectoryName
+          if (-not $wix) { throw "WiX Toolset not found after install" }
+          Add-Content -Path $env:GITHUB_PATH -Value $wix
+
+      - name: Install cargo-wix
+        run: cargo install cargo-wix --locked
+
+      - name: Read version
+        id: ver
+        shell: bash
+        run: echo "v=$(grep -oE '[0-9]+\.[0-9]+\.[0-9]+' VERSION | head -1)" >> "$GITHUB_OUTPUT"
+
+      - name: Build .msi (bundles raz + raz-tui)
+        run: cargo wix -p raz --no-build --nocapture
 
       - name: Stage artifacts
         shell: bash
         run: |
           mkdir -p dist
-          cp "target/release/raz${{ matrix.ext }}"     "dist/raz-${{ matrix.label }}${{ matrix.ext }}"
-          cp "target/release/raz-tui${{ matrix.ext }}" "dist/raz-tui-${{ matrix.label }}${{ matrix.ext }}"
+          cp target/wix/*.msi "dist/raz-${{ steps.ver.outputs.v }}-windows-x86_64-setup.msi"
+          cp target/release/raz.exe     dist/raz-windows-x86_64.exe
+          cp target/release/raz-tui.exe dist/raz-tui-windows-x86_64.exe
 
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
-          name: raz-release-${{ matrix.label }}
+          name: raz-windows
           path: dist/*
 
   publish:
     name: Publish GitHub Release
-    needs: build
+    needs: [linux, windows]
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Read version
         id: version
         shell: bash
         run: |
-          VERSION="$(grep -oE 'v?[0-9]+\.[0-9]+\.[0-9]+' VERSION | head -1)"
-          VERSION="${VERSION#v}"
+          VERSION="$(grep -oE '[0-9]+\.[0-9]+\.[0-9]+' VERSION | head -1)"
           echo "tag=v${VERSION}" >> "$GITHUB_OUTPUT"
 
       - name: Download all artifacts

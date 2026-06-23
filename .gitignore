@@ -1,6 +1,12 @@
-# Rust build output — never committed.
+# Rust / Cargo build output — never committed.
 /target
+**/target/
 /dist
 
-# Editor/back-up cruft
+# Packaging / installer artifacts (built in CI, attached to releases).
+*.msi
+*.deb
+*.pdb
+
+# Editor / back-up cruft
 **/*.rs.bk

@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="windows-1252"?>
+<!--
+  WiX v3 source for the raz Windows installer (built by cargo-wix).
+  Installs both binaries (raz.exe, raz-tui.exe) into "Program Files\raz" and appends that
+  directory to the system PATH. cargo-wix supplies $(var.Version) and $(var.CargoTargetBinDir).
+-->
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Product
+    Id="*"
+    Name="raz"
+    UpgradeCode="7E2B1C4A-3D5F-4A6B-9C8D-1E2F3A4B5C6D"
+    Manufacturer="KarlesP"
+    Language="1033"
+    Codepage="1252"
+    Version="$(var.Version)">
+
+    <Package
+      Id="*"
+      Keywords="Installer"
+      Description="raz — a Rust port of a slice of the Azure CLI"
+      Manufacturer="KarlesP"
+      InstallerVersion="450"
+      Languages="1033"
+      Compressed="yes"
+      InstallScope="perMachine"
+      SummaryCodepage="1252" />
+
+    <MajorUpgrade
+      Schedule="afterInstallInitialize"
+      DowngradeErrorMessage="A newer version of raz is already installed. Setup will now exit." />
+
+    <Media Id="1" Cabinet="media1.cab" EmbedCab="yes" DiskPrompt="raz Installation" />
+    <Property Id="DiskPrompt" Value="raz Installation" />
+
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="ProgramFiles64Folder" Name="PFiles">
+        <Directory Id="APPLICATIONFOLDER" Name="raz">
+
+          <Component Id="binRaz" Guid="A1B2C3D4-0001-4A6B-9C8D-1E2F3A4B5C61" Win64="yes">
+            <File Id="exeRaz" Name="raz.exe" DiskId="1"
+                  Source="$(var.CargoTargetBinDir)\raz.exe" KeyPath="yes" />
+          </Component>
+
+          <Component Id="binRazTui" Guid="A1B2C3D4-0002-4A6B-9C8D-1E2F3A4B5C62" Win64="yes">
+            <File Id="exeRazTui" Name="raz-tui.exe" DiskId="1"
+                  Source="$(var.CargoTargetBinDir)\raz-tui.exe" KeyPath="yes" />
+          </Component>
+
+          <!-- Append the install dir to the system PATH; removed on uninstall. -->
+          <Component Id="PathEnv" Guid="A1B2C3D4-0003-4A6B-9C8D-1E2F3A4B5C63" Win64="yes">
+            <CreateFolder />
+            <Environment Id="UpdatePath" Name="PATH" Value="[APPLICATIONFOLDER]"
+                         Permanent="no" Part="last" Action="set" System="yes" />
+          </Component>
+
+        </Directory>
+      </Directory>
+    </Directory>
+
+    <Feature Id="Binaries" Title="raz" Level="1"
+             Description="The raz CLI and raz-tui dashboard, on your PATH.">
+      <ComponentRef Id="binRaz" />
+      <ComponentRef Id="binRazTui" />
+      <ComponentRef Id="PathEnv" />
+    </Feature>
+
+    <Property Id="ARPHELPLINK" Value="https://github.com/KarlesP/raz" />
+  </Product>
+</Wix>
