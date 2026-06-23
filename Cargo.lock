@@ -1081,6 +1081,7 @@ dependencies = [
  "ratatui",
  "raz-core",
  "reqwest",
+ "serde",
  "serde_json",
  "tachyonfx",
  "tokio",

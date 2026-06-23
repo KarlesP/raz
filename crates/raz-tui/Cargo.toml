@@ -14,6 +14,7 @@ path = "src/main.rs"
 raz-core = { workspace = true }
 tokio = { workspace = true }
 reqwest = { workspace = true }
+serde = { workspace = true }
 serde_json = { workspace = true }
 ratatui = { workspace = true }
 tachyonfx = { workspace = true }

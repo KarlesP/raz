@@ -4,6 +4,7 @@
 //! az's contract via [`raz_core::RazError::exit_code`].
 
 mod commands;
+mod schema;
 
 use clap::{Args, Parser, Subcommand};
 
@@ -80,6 +81,13 @@ enum TopCommand {
 
 #[tokio::main]
 async fn main() {
+    // Hidden introspection command: dump the clap command tree as JSON for raz-tui's
+    // autocomplete. Intercepted before clap parsing so it never appears in help/usage.
+    if std::env::args().nth(1).as_deref() == Some("__schema") {
+        schema::print::<Cli>();
+        return;
+    }
+
     let cli = Cli::parse();
     let code = match run(cli).await {
         Ok(()) => 0,

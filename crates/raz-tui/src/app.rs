@@ -10,6 +10,7 @@ use std::time::{Duration as StdDuration, Instant};
 use ratatui::crossterm::event::KeyCode;
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Tabs, Wrap};
+use serde::Deserialize;
 use serde_json::Value;
 use tachyonfx::{fx, EffectManager, Interpolation};
 use tokio::runtime::Runtime;
@@ -43,110 +44,41 @@ struct LoginState {
     status: String,
 }
 
-/// A palette-offered command: its name, the arguments it accepts, and a one-line description.
-struct CommandInfo {
-    name: &'static str,
-    args: &'static str,
-    help: &'static str,
+/// One command in the schema dumped by `raz __schema` (its leaf path, description, and flags).
+#[derive(Deserialize, Clone)]
+struct CmdSchema {
+    path: String,
+    about: String,
+    flags: Vec<FlagSchema>,
 }
 
-/// Commands offered by the palette autocomplete. Session commands (login/logout) are omitted —
-/// the TUI owns the session via its login gate.
-const COMMANDS: &[CommandInfo] = &[
-    CommandInfo {
-        name: "account list",
-        args: "",
-        help: "List subscriptions across all tenants.",
-    },
-    CommandInfo {
-        name: "account show",
-        args: "",
-        help: "Show the active subscription.",
-    },
-    CommandInfo {
-        name: "account set",
-        args: "-s <id|name>",
-        help: "Set the active subscription (persisted to ~/.raz).",
-    },
-    CommandInfo {
-        name: "account list-tenants",
-        args: "",
-        help: "List the tenants the cached subscriptions belong to.",
-    },
-    CommandInfo {
-        name: "group list",
-        args: "",
-        help: "List resource groups.",
-    },
-    CommandInfo {
-        name: "group show",
-        args: "-n <name>",
-        help: "Show one resource group.",
-    },
-    CommandInfo {
-        name: "group create",
-        args: "-n <name> [-l <location>]",
-        help: "Create a resource group (default West Europe).",
-    },
-    CommandInfo {
-        name: "group delete",
-        args: "-n <name> --yes",
-        help: "Delete a resource group and everything in it.",
-    },
-    CommandInfo {
-        name: "vnet list",
-        args: "",
-        help: "List virtual networks.",
-    },
-    CommandInfo {
-        name: "vnet show",
-        args: "-g <rg> -n <name>",
-        help: "Show one virtual network.",
-    },
-    CommandInfo {
-        name: "vnet create",
-        args: "-g <rg> -n <name> [-l <loc>] [--address-prefix <cidr>]",
-        help: "Create a vnet with a default subnet.",
-    },
-    CommandInfo {
-        name: "vnet update",
-        args: "-g <rg> -n <name> [--tag k=v] [--add-prefix <cidr>]",
-        help: "Update vnet tags / address space.",
-    },
-    CommandInfo {
-        name: "vnet delete",
-        args: "-g <rg> -n <name>",
-        help: "Delete a virtual network.",
-    },
-    CommandInfo {
-        name: "vm list",
-        args: "",
-        help: "List virtual machines.",
-    },
-    CommandInfo {
-        name: "vm show",
-        args: "-g <rg> -n <name>",
-        help: "Show one virtual machine.",
-    },
-    CommandInfo {
-        name: "vm create",
-        args: "-g <rg> -n <name> (--ssh-key-value <k> | --admin-password <p>) [--size <sku>]",
-        help: "Create a Linux VM (Ubuntu, West Europe, B1s).",
-    },
-    CommandInfo {
-        name: "vm update",
-        args: "-g <rg> -n <name> [--size <sku>] [--tag k=v]",
-        help: "Resize and/or retag a VM.",
-    },
-    CommandInfo {
-        name: "vm delete",
-        args: "-g <rg> -n <name>",
-        help: "Delete a virtual machine.",
-    },
-];
+#[derive(Deserialize, Clone)]
+struct FlagSchema {
+    long: String,
+    short: Option<String>,
+    takes_value: bool,
+    required: bool,
+    help: String,
+}
 
-/// The `:`-activated command bar: a text input with an editable cursor, prefix-autocomplete
-/// over [`COMMANDS`], and the output of the last executed command.
+/// A palette autocomplete entry: a whole command, or the next flag for the current command.
+enum Suggestion {
+    Command { path: String, about: String },
+    Flag { token: String, help: String },
+}
+
+impl Suggestion {
+    /// Text shown in the suggestions list.
+    fn label(&self) -> &str {
+        match self {
+            Suggestion::Command { path, .. } => path,
+            Suggestion::Flag { token, .. } => token,
+        }
+    }
+}
+
+/// The `:`-activated command bar: a text input with an editable cursor and the output of the
+/// last executed command. Suggestions are computed by the owning [`App`] from its schema.
 struct Palette {
     input: String,
     /// Cursor position as a character index into `input` (0..=char_count).
@@ -163,16 +95,6 @@ impl Palette {
             selected: 0,
             output: String::new(),
         }
-    }
-
-    /// Commands matching the current input: those whose name the input is completing, plus the
-    /// command the input has already completed (so its usage stays visible while typing args).
-    fn suggestions(&self) -> Vec<&'static CommandInfo> {
-        let q = self.input.trim_start();
-        COMMANDS
-            .iter()
-            .filter(|c| c.name.starts_with(q) || q.starts_with(c.name))
-            .collect()
     }
 
     /// Byte offset of character index `i` (or end of string).
@@ -239,6 +161,8 @@ pub struct App {
     palette: Option<Palette>,
     /// Receiver for an in-flight palette command running on a background thread.
     cmd_rx: Option<Receiver<String>>,
+    /// Command/flag schema for palette autocomplete, loaded once from `raz __schema`.
+    schema: Vec<CmdSchema>,
     effects: EffectManager<()>,
 }
 
@@ -275,6 +199,7 @@ impl App {
             message: String::new(),
             palette: None,
             cmd_rx: None,
+            schema: load_schema(),
             effects: EffectManager::default(),
         };
 
@@ -441,38 +366,160 @@ impl App {
     }
 
     fn handle_palette_key(&mut self, code: KeyCode) {
-        let Some(palette) = self.palette.as_mut() else {
-            return;
-        };
         match code {
             KeyCode::Esc => self.palette = None,
             KeyCode::Enter => self.run_palette_command(),
-            KeyCode::Tab => {
-                let suggestions = palette.suggestions();
-                if let Some(choice) = suggestions.get(palette.selected) {
-                    palette.set_input(format!("{} ", choice.name));
+            KeyCode::Tab => self.palette_complete(),
+            KeyCode::Down => self.palette_move(1),
+            KeyCode::Up => self.palette_move(-1),
+            KeyCode::Left => {
+                if let Some(p) = self.palette.as_mut() {
+                    p.cursor = p.cursor.saturating_sub(1);
                 }
             }
-            KeyCode::Down => {
-                let n = palette.suggestions().len();
-                if n > 0 {
-                    palette.selected = (palette.selected + 1) % n;
+            KeyCode::Right => {
+                if let Some(p) = self.palette.as_mut() {
+                    p.cursor = (p.cursor + 1).min(p.char_count());
                 }
             }
-            KeyCode::Up => {
-                let n = palette.suggestions().len();
-                if n > 0 {
-                    palette.selected = (palette.selected + n - 1) % n;
+            KeyCode::Home => {
+                if let Some(p) = self.palette.as_mut() {
+                    p.cursor = 0;
                 }
             }
-            KeyCode::Left => palette.cursor = palette.cursor.saturating_sub(1),
-            KeyCode::Right => palette.cursor = (palette.cursor + 1).min(palette.char_count()),
-            KeyCode::Home => palette.cursor = 0,
-            KeyCode::End => palette.cursor = palette.char_count(),
-            KeyCode::Backspace => palette.backspace(),
-            KeyCode::Delete => palette.delete(),
-            KeyCode::Char(c) => palette.insert(c),
+            KeyCode::End => {
+                if let Some(p) = self.palette.as_mut() {
+                    p.cursor = p.char_count();
+                }
+            }
+            KeyCode::Backspace => {
+                if let Some(p) = self.palette.as_mut() {
+                    p.backspace();
+                }
+            }
+            KeyCode::Delete => {
+                if let Some(p) = self.palette.as_mut() {
+                    p.delete();
+                }
+            }
+            KeyCode::Char(c) => {
+                if let Some(p) = self.palette.as_mut() {
+                    p.insert(c);
+                }
+            }
             _ => {}
+        }
+    }
+
+    /// The command whose flags should be suggested: the longest schema path the input has fully
+    /// typed followed by a space (so we are now entering its arguments).
+    fn matched_command(&self) -> Option<&CmdSchema> {
+        let input = self.palette.as_ref()?.input.trim_start();
+        self.schema
+            .iter()
+            .filter(|c| input.starts_with(&format!("{} ", c.path)))
+            .max_by_key(|c| c.path.len())
+    }
+
+    /// Context-aware autocomplete: flag suggestions once a command is entered, else command
+    /// names. Flags already present are dropped and the partial `-…` word filters the rest.
+    fn palette_suggestions(&self) -> Vec<Suggestion> {
+        let Some(palette) = self.palette.as_ref() else {
+            return Vec::new();
+        };
+        let input = palette.input.trim_start();
+
+        if let Some(cmd) = self.matched_command() {
+            let rest = &input[cmd.path.len()..];
+            let present: Vec<&str> = rest
+                .split_whitespace()
+                .filter(|t| t.starts_with('-'))
+                .collect();
+            let last = if input.ends_with(' ') {
+                ""
+            } else {
+                rest.split_whitespace().last().unwrap_or("")
+            };
+            let filter = if last.starts_with('-') { last } else { "" };
+
+            let mut flags: Vec<&FlagSchema> = cmd
+                .flags
+                .iter()
+                .filter(|f| {
+                    let long = format!("--{}", f.long);
+                    let short = f.short.as_ref().map(|s| format!("-{s}"));
+                    let used = present
+                        .iter()
+                        .any(|p| *p == long || short.as_deref() == Some(*p));
+                    let matches = filter.is_empty()
+                        || long.starts_with(filter)
+                        || short.as_deref().is_some_and(|s| s.starts_with(filter));
+                    !used && matches
+                })
+                .collect();
+            flags.sort_by_key(|f| !f.required); // required flags first
+            flags
+                .into_iter()
+                .map(|f| Suggestion::Flag {
+                    token: format!("--{}", f.long),
+                    help: f.help.clone(),
+                })
+                .collect()
+        } else {
+            self.schema
+                .iter()
+                .filter(|c| c.path.starts_with(input))
+                .map(|c| Suggestion::Command {
+                    path: c.path.clone(),
+                    about: c.about.clone(),
+                })
+                .collect()
+        }
+    }
+
+    fn palette_move(&mut self, delta: i32) {
+        let n = self.palette_suggestions().len();
+        if let Some(p) = self.palette.as_mut() {
+            if n > 0 {
+                p.selected = (p.selected as i32 + delta).rem_euclid(n as i32) as usize;
+            }
+        }
+    }
+
+    /// Apply the highlighted suggestion: a command replaces the line; a flag replaces the
+    /// partial `-…` word being typed. Either way the cursor ends at the end.
+    fn palette_complete(&mut self) {
+        let suggestions = self.palette_suggestions();
+        if suggestions.is_empty() {
+            return;
+        }
+        let selected = self
+            .palette
+            .as_ref()
+            .map(|p| p.selected.min(suggestions.len() - 1))
+            .unwrap_or(0);
+        let current = self
+            .palette
+            .as_ref()
+            .map(|p| p.input.clone())
+            .unwrap_or_default();
+
+        let new_input = match &suggestions[selected] {
+            Suggestion::Command { path, .. } => format!("{path} "),
+            Suggestion::Flag { token, .. } => {
+                let base = if current.ends_with(' ') {
+                    current.clone()
+                } else {
+                    match current.rfind(' ') {
+                        Some(i) => current[..=i].to_string(),
+                        None => String::new(),
+                    }
+                };
+                format!("{base}{token} ")
+            }
+        };
+        if let Some(p) = self.palette.as_mut() {
+            p.set_input(new_input);
         }
     }
 
@@ -625,7 +672,12 @@ impl App {
     }
 
     fn draw_palette(&mut self, frame: &mut Frame, area: Rect) {
+        // Computed before borrowing `palette` (these read `&self`).
+        let suggestions = self.palette_suggestions();
+        let usage = self.palette_usage();
         let palette = self.palette.as_ref().expect("palette is open");
+        let selected = palette.selected.min(suggestions.len().saturating_sub(1));
+
         let chunks = Layout::vertical([
             Constraint::Length(3), // input
             Constraint::Length(4), // usage of the selected command
@@ -641,19 +693,9 @@ impl App {
                 .title(" Command "),
         );
         frame.render_widget(input, chunks[0]);
-        // Cursor sits after the "> " prompt (2 cols) inside the border (1 col), at the cursor
-        // character index.
+        // Cursor sits after the "> " prompt (2 cols) inside the border (1 col).
         frame.set_cursor_position((chunks[0].x + 3 + palette.cursor as u16, chunks[0].y + 1));
 
-        let suggestions = palette.suggestions();
-        let selected = palette.selected.min(suggestions.len().saturating_sub(1));
-
-        // Usage line + description for the highlighted command, so the user sees the exact
-        // parameters to type next.
-        let usage = match suggestions.get(selected) {
-            Some(c) => format!("raz {} {}\n{}", c.name, c.args, c.help),
-            None => "No matching command.".to_string(),
-        };
         frame.render_widget(
             Paragraph::new(usage)
                 .wrap(Wrap { trim: true })
@@ -664,19 +706,28 @@ impl App {
         let body = Layout::horizontal([Constraint::Percentage(40), Constraint::Percentage(60)])
             .split(chunks[2]);
 
-        let items: Vec<ListItem> = suggestions.iter().map(|c| ListItem::new(c.name)).collect();
+        let items: Vec<ListItem> = suggestions
+            .iter()
+            .map(|s| ListItem::new(s.label()))
+            .collect();
         let mut state = ListState::default();
         if !suggestions.is_empty() {
             state.select(Some(selected));
         }
+        let title = if self.matched_command().is_some() {
+            " Flags "
+        } else {
+            " Commands "
+        };
         let list = List::new(items)
-            .block(Block::default().borders(Borders::ALL).title(" Commands "))
+            .block(Block::default().borders(Borders::ALL).title(title))
             .highlight_style(Style::default().fg(Color::Black).bg(Color::Cyan))
             .highlight_symbol("➤ ");
         frame.render_stateful_widget(list, body[0], &mut state);
 
         let output = if palette.output.is_empty() {
-            "Tab completes the selected command, then add the arguments shown above.".to_string()
+            "Tab completes the highlighted item; ↑/↓ pick. Add the arguments shown above."
+                .to_string()
         } else {
             palette.output.clone()
         };
@@ -691,6 +742,30 @@ impl App {
             footer("Enter: run   Tab: complete   ↑/↓: pick   Esc: close"),
             chunks[3],
         );
+    }
+
+    /// Usage line + description shown above the suggestions: the command being argument-completed
+    /// if any, else the highlighted command suggestion.
+    fn palette_usage(&self) -> String {
+        if let Some(cmd) = self.matched_command() {
+            return format!("{}\n{}", usage_line(cmd), cmd.about);
+        }
+        let suggestions = self.palette_suggestions();
+        let sel = self
+            .palette
+            .as_ref()
+            .map(|p| p.selected.min(suggestions.len().saturating_sub(1)))
+            .unwrap_or(0);
+        match suggestions.get(sel) {
+            Some(Suggestion::Command { path, about }) => {
+                match self.schema.iter().find(|c| &c.path == path) {
+                    Some(cmd) => format!("{}\n{}", usage_line(cmd), about),
+                    None => format!("raz {path}\n{about}"),
+                }
+            }
+            Some(Suggestion::Flag { token, help }) => format!("{token}\n{help}"),
+            None => "No matching command.".to_string(),
+        }
     }
 
     fn draw_login(&self, frame: &mut Frame, area: Rect) {
@@ -857,6 +932,72 @@ fn run_raz(input: &str) -> String {
         }
         Err(e) => format!("failed to run raz: {e}"),
     }
+}
+
+/// Load the command/flag schema from `raz __schema`, dropping session commands (the TUI owns
+/// login/logout). Falls back to a name-only command list if the call or parse fails.
+fn load_schema() -> Vec<CmdSchema> {
+    let parsed: Vec<CmdSchema> = serde_json::from_str(&run_raz("__schema")).unwrap_or_default();
+    let filtered: Vec<CmdSchema> = parsed
+        .into_iter()
+        .filter(|c| c.path != "login" && c.path != "logout")
+        .collect();
+    if filtered.is_empty() {
+        fallback_schema()
+    } else {
+        filtered
+    }
+}
+
+/// Minimal command list used only if `raz __schema` is unavailable — keeps name completion
+/// working (without per-flag data) so the palette never breaks.
+fn fallback_schema() -> Vec<CmdSchema> {
+    [
+        "account list",
+        "account show",
+        "account set",
+        "account list-tenants",
+        "group list",
+        "group show",
+        "group create",
+        "group delete",
+        "vnet list",
+        "vnet show",
+        "vnet create",
+        "vnet update",
+        "vnet delete",
+        "vm list",
+        "vm show",
+        "vm create",
+        "vm update",
+        "vm delete",
+    ]
+    .iter()
+    .map(|p| CmdSchema {
+        path: (*p).to_string(),
+        about: String::new(),
+        flags: Vec::new(),
+    })
+    .collect()
+}
+
+/// One-line usage string for a command, omitting the global flags to keep it focused on the
+/// command's own parameters: `(--required <val>)` / `[--optional <val>]`.
+fn usage_line(cmd: &CmdSchema) -> String {
+    let mut parts = vec![format!("raz {}", cmd.path)];
+    for f in &cmd.flags {
+        if matches!(f.long.as_str(), "subscription" | "output" | "query") {
+            continue;
+        }
+        let val = if f.takes_value { " <val>" } else { "" };
+        let token = format!("--{}{val}", f.long);
+        parts.push(if f.required {
+            format!("({token})")
+        } else {
+            format!("[{token}]")
+        });
+    }
+    parts.join(" ")
 }
 
 fn move_selection(state: &mut ListState, len: usize, delta: i32) {
