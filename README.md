@@ -11,13 +11,11 @@ command-module design and ships **two front-ends over one core library**:
 
 ## Screenshots (raz-tui)
 
-<!--
-  Placeholders — uncomment once the captures are added to docs/screenshots/.
+> _Placeholder images — replace the files in `docs/screenshots/` with real captures._
 
-  | Login (device code) | Subscriptions | Resource explorer |
-  |---|---|---|
-  | ![raz-tui login screen](docs/screenshots/tui-login.png) | ![raz-tui subscriptions list](docs/screenshots/tui-subscriptions.png) | ![raz-tui VM/VNet explorer](docs/screenshots/tui-resources.png) |
--->
+| Login (device code) | Subscriptions | Resource explorer |
+|---|---|---|
+| ![raz-tui login screen](docs/screenshots/tui-login.png) | ![raz-tui subscriptions list](docs/screenshots/tui-subscriptions.png) | ![raz-tui VM/VNet explorer](docs/screenshots/tui-resources.png) |
 
 ## Workspace
 
