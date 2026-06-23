@@ -145,15 +145,26 @@ const COMMANDS: &[CommandInfo] = &[
     },
 ];
 
-/// The `:`-activated command bar: a text input, prefix-autocomplete over [`COMMANDS`], and the
-/// output of the last executed command.
+/// The `:`-activated command bar: a text input with an editable cursor, prefix-autocomplete
+/// over [`COMMANDS`], and the output of the last executed command.
 struct Palette {
     input: String,
+    /// Cursor position as a character index into `input` (0..=char_count).
+    cursor: usize,
     selected: usize,
     output: String,
 }
 
 impl Palette {
+    fn new() -> Self {
+        Palette {
+            input: String::new(),
+            cursor: 0,
+            selected: 0,
+            output: String::new(),
+        }
+    }
+
     /// Commands matching the current input: those whose name the input is completing, plus the
     /// command the input has already completed (so its usage stays visible while typing args).
     fn suggestions(&self) -> Vec<&'static CommandInfo> {
@@ -162,6 +173,50 @@ impl Palette {
             .iter()
             .filter(|c| c.name.starts_with(q) || q.starts_with(c.name))
             .collect()
+    }
+
+    /// Byte offset of character index `i` (or end of string).
+    fn byte_at(&self, i: usize) -> usize {
+        self.input
+            .char_indices()
+            .nth(i)
+            .map(|(b, _)| b)
+            .unwrap_or(self.input.len())
+    }
+
+    fn char_count(&self) -> usize {
+        self.input.chars().count()
+    }
+
+    fn insert(&mut self, c: char) {
+        let at = self.byte_at(self.cursor);
+        self.input.insert(at, c);
+        self.cursor += 1;
+        self.selected = 0;
+    }
+
+    fn backspace(&mut self) {
+        if self.cursor > 0 {
+            let at = self.byte_at(self.cursor - 1);
+            self.input.remove(at);
+            self.cursor -= 1;
+            self.selected = 0;
+        }
+    }
+
+    fn delete(&mut self) {
+        if self.cursor < self.char_count() {
+            let at = self.byte_at(self.cursor);
+            self.input.remove(at);
+            self.selected = 0;
+        }
+    }
+
+    /// Replace the whole input (used by autocomplete) and move the cursor to the end.
+    fn set_input(&mut self, text: String) {
+        self.input = text;
+        self.cursor = self.char_count();
+        self.selected = 0;
     }
 }
 
@@ -367,11 +422,7 @@ impl App {
         }
         // `:` opens the command bar from the dashboard.
         if code == KeyCode::Char(':') && !matches!(self.view, View::Login) {
-            self.palette = Some(Palette {
-                input: String::new(),
-                selected: 0,
-                output: String::new(),
-            });
+            self.palette = Some(Palette::new());
             return;
         }
         if matches!(code, KeyCode::Char('q')) {
@@ -399,8 +450,7 @@ impl App {
             KeyCode::Tab => {
                 let suggestions = palette.suggestions();
                 if let Some(choice) = suggestions.get(palette.selected) {
-                    palette.input = format!("{} ", choice.name);
-                    palette.selected = 0;
+                    palette.set_input(format!("{} ", choice.name));
                 }
             }
             KeyCode::Down => {
@@ -415,14 +465,13 @@ impl App {
                     palette.selected = (palette.selected + n - 1) % n;
                 }
             }
-            KeyCode::Backspace => {
-                palette.input.pop();
-                palette.selected = 0;
-            }
-            KeyCode::Char(c) => {
-                palette.input.push(c);
-                palette.selected = 0;
-            }
+            KeyCode::Left => palette.cursor = palette.cursor.saturating_sub(1),
+            KeyCode::Right => palette.cursor = (palette.cursor + 1).min(palette.char_count()),
+            KeyCode::Home => palette.cursor = 0,
+            KeyCode::End => palette.cursor = palette.char_count(),
+            KeyCode::Backspace => palette.backspace(),
+            KeyCode::Delete => palette.delete(),
+            KeyCode::Char(c) => palette.insert(c),
             _ => {}
         }
     }
@@ -592,10 +641,9 @@ impl App {
                 .title(" Command "),
         );
         frame.render_widget(input, chunks[0]);
-        frame.set_cursor_position((
-            chunks[0].x + 3 + palette.input.len() as u16,
-            chunks[0].y + 1,
-        ));
+        // Cursor sits after the "> " prompt (2 cols) inside the border (1 col), at the cursor
+        // character index.
+        frame.set_cursor_position((chunks[0].x + 3 + palette.cursor as u16, chunks[0].y + 1));
 
         let suggestions = palette.suggestions();
         let selected = palette.selected.min(suggestions.len().saturating_sub(1));
