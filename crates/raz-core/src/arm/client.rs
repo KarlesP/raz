@@ -59,7 +59,13 @@ pub async fn discover_all(
     let mut subs: Vec<Subscription> = Vec::new();
     if let Some(refresh) = &token.refresh_token {
         for tenant in &tenants {
-            let Ok(tok) = device_code::exchange_refresh_token(http, &tenant.id, refresh).await
+            let Ok(tok) = device_code::exchange_refresh_token(
+                http,
+                &tenant.id,
+                refresh,
+                device_code::DEFAULT_SCOPE,
+            )
+            .await
             else {
                 continue; // tenant not redeemable for this identity; skip it
             };

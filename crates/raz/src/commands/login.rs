@@ -1,13 +1,15 @@
-//! `raz login` — device-code flow + subscription discovery + profile persistence.
-//! Mirrors az `profile/custom.py::login`.
+//! `raz login` — interactive device-code flow or non-interactive service-principal sign-in
+//! (client secret or OIDC federated token), then subscription discovery + profile persistence.
+//! Mirrors `az login` / `az login --service-principal`.
 
 use clap::Args;
 
 use raz_core::arm::client::discover_all;
-use raz_core::auth::{cache_from_response, device_code};
+use raz_core::auth::device_code::TokenResponse;
+use raz_core::auth::{cache_from_response, device_code, sp};
 use raz_core::config::Profile;
 use raz_core::context::new_http_client;
-use raz_core::error::Result;
+use raz_core::error::{usage, Result};
 use raz_core::GlobalArgs;
 
 #[derive(Args)]
@@ -16,35 +18,46 @@ pub struct LoginArgs {
     /// the last tenant you logged into, then the multi-tenant authority (`organizations`).
     #[arg(long, short = 't', env = "AZURE_TENANT_ID")]
     pub tenant: Option<String>,
+
+    /// Sign in as a service principal (non-interactive) instead of the device-code flow.
+    #[arg(long)]
+    pub service_principal: bool,
+
+    /// Service-principal application (client) ID. Required with --service-principal.
+    #[arg(long, env = "AZURE_CLIENT_ID")]
+    pub client_id: Option<String>,
+
+    /// Service-principal client secret.
+    #[arg(long, env = "AZURE_CLIENT_SECRET")]
+    pub client_secret: Option<String>,
+
+    /// OIDC federated token (JWT) for passwordless sign-in. If omitted under
+    /// --service-principal, raz fetches one from the GitHub Actions OIDC provider.
+    #[arg(long, env = "AZURE_FEDERATED_TOKEN")]
+    pub federated_token: Option<String>,
+
+    /// Audience for the fetched GitHub Actions OIDC token.
+    #[arg(long, default_value = "api://AzureADTokenExchange")]
+    pub federated_token_audience: String,
 }
 
 pub async fn run(args: LoginArgs, _globals: &GlobalArgs) -> Result<()> {
     let http = new_http_client();
     let mut profile = Profile::load()?;
 
-    // Resolve the tenant: explicit flag / AZURE_TENANT_ID, else the last tenant used, else
-    // the multi-tenant authority. ARM `/subscriptions` is tenant-scoped, so reusing the last
-    // tenant means a bare `raz login` keeps seeing the same subscriptions.
-    let tenant = args
-        .tenant
-        .clone()
-        .or_else(|| profile.tenant_id.clone())
-        .unwrap_or_else(|| "organizations".to_string());
-    println!("Signing in to tenant: {tenant}");
-
-    // Step 1+2: device-code flow. The closure prints the user prompt as soon as it's known.
-    let token = device_code::run_flow(&http, &tenant, |dc| {
-        println!("{}", dc.message);
-    })
-    .await?;
+    let (tenant, token) = if args.service_principal {
+        service_principal_login(&http, &args).await?
+    } else {
+        device_code_login(&http, &profile, &args).await?
+    };
 
     // Persist the token first so it can be reused for discovery and later commands.
     profile.tenant_id = Some(tenant);
     profile.token = Some(cache_from_response(&token));
     profile.save()?;
 
-    // Step 3: enumerate every tenant the identity can reach and the subscriptions in each
-    // (silently, via the refresh token) — the az-style cross-tenant view.
+    // Enumerate the tenants/subscriptions the identity can reach. With a refresh token this is
+    // cross-tenant; a service-principal token has none, so it degrades to its single tenant.
     let (tenants, subs) = discover_all(&http, &token).await?;
 
     if !tenants.is_empty() {
@@ -75,4 +88,57 @@ pub async fn run(args: LoginArgs, _globals: &GlobalArgs) -> Result<()> {
         println!("or target one per command with `raz -s <id|name> vm list`.");
     }
     Ok(())
+}
+
+/// Interactive device-code flow. Resolves the tenant from the flag/env, else the last tenant
+/// used, else the multi-tenant authority.
+async fn device_code_login(
+    http: &reqwest::Client,
+    profile: &Profile,
+    args: &LoginArgs,
+) -> Result<(String, TokenResponse)> {
+    let tenant = args
+        .tenant
+        .clone()
+        .or_else(|| profile.tenant_id.clone())
+        .unwrap_or_else(|| "organizations".to_string());
+    println!("Signing in to tenant: {tenant}");
+
+    let token = device_code::run_flow(http, &tenant, |dc| {
+        println!("{}", dc.message);
+    })
+    .await?;
+    Ok((tenant, token))
+}
+
+/// Non-interactive service-principal sign-in: client secret if given, otherwise an OIDC
+/// federated token (`--federated-token`, or fetched from the GitHub Actions OIDC provider).
+async fn service_principal_login(
+    http: &reqwest::Client,
+    args: &LoginArgs,
+) -> Result<(String, TokenResponse)> {
+    let client_id = args
+        .client_id
+        .clone()
+        .ok_or_else(|| usage("--service-principal requires --client-id"))?;
+    let tenant = args
+        .tenant
+        .clone()
+        .ok_or_else(|| usage("--service-principal requires --tenant"))?;
+
+    let token = if let Some(secret) = &args.client_secret {
+        println!("Signing in as service principal {client_id} (client secret) to {tenant}");
+        sp::acquire_client_secret(http, &tenant, &client_id, secret).await?
+    } else {
+        let assertion = match &args.federated_token {
+            Some(t) => t.clone(),
+            None => {
+                println!("Fetching GitHub Actions OIDC token…");
+                sp::fetch_github_oidc_token(http, &args.federated_token_audience).await?
+            }
+        };
+        println!("Signing in as service principal {client_id} (federated token) to {tenant}");
+        sp::acquire_federated(http, &tenant, &client_id, &assertion).await?
+    };
+    Ok((tenant, token))
 }
