@@ -36,9 +36,11 @@ Median of 7 runs on Windows 10, `az` 2.85.0 vs `raz` 0.1.0 (release build), outp
 > ballpark — but `raz` still trims the ~0.4 s `az` startup off every single call, which adds up
 > fast in scripts and loops.
 
-**Fairness note.** `raz` implements a *slice* of `az` (login, account, vnet/vm `list`/`show`);
-mutating commands (`create`/`delete`/`start`/`stop`) are stubbed. The numbers above compare CLI
-overhead and read paths, not feature parity — `az vm create` has no `raz` equivalent to race.
+**Fairness note.** `raz` implements a *slice* of `az`. The numbers above compare CLI overhead
+and read paths, not feature parity. `raz` does implement `vnet`/`vm` `create`/`update`/`delete`,
+but those are dominated by Azure's own provisioning time (seconds to minutes of ARM
+long-running operations), so they are not a meaningful CLI-speed differentiator — the startup
+win is what compounds across the many quick commands a session actually runs.
 
 ## Workspace
 
@@ -63,10 +65,12 @@ crates/
 ## Scope (this skeleton)
 
 - **Live:** `login` (OAuth device-code flow against Entra, with az-style cross-tenant
-  subscription discovery), `logout`, `account` (list/show/set/list-tenants), and `vnet`/`vm`
-  `list` + `show` (real ARM REST GETs).
-- **Stubbed with explanatory errors:** `vnet`/`vm` `create`/`delete` and `vm` `start`/`stop`
-  (these are ARM mutations / long-running operations).
+  subscription discovery), `logout`, `account` (list/show/set/list-tenants), `vnet`/`vm`
+  `list` + `show` (ARM GETs), and **`vnet`/`vm` `create` / `update` / `delete`** — real ARM
+  PUT/DELETE with long-running-operation polling. New resources default to **West Europe**;
+  `vm create` auto-provisions the resource group, virtual network/subnet, and NIC it needs.
+- **Stubbed with explanatory errors:** `vm` `start`/`stop` (action-style long-running
+  operations).
 - HTTP uses `reqwest`. A production port would back `arm::client` and the token credential
   with `azure_core` (`Pipeline` + `BearerTokenPolicy`) and `azure_identity`; the
   `auth::credential::TokenSource` and `arm::client` seams are shaped for that swap.
@@ -94,6 +98,15 @@ raz vnet list -o table             # virtual networks
 raz vm show -g <rg> -n <name>      # single VM as JSON
 raz -s <id|name> vm list           # override subscription for one command
 raz --query "0.name" vm list       # minimal dotted-path projection
+
+# Create / update / delete (default region: West Europe)
+raz vnet create -g <rg> -n <vnet>                      # 10.0.0.0/16 + default subnet
+raz vnet update -g <rg> -n <vnet> --tag env=dev --add-prefix 10.1.0.0/16
+raz vnet delete -g <rg> -n <vnet>
+raz vm create -g <rg> -n <vm> --ssh-key-value "$(cat ~/.ssh/id_rsa.pub)"
+raz vm update -g <rg> -n <vm> --size Standard_B2s --tag owner=me
+raz vm delete -g <rg> -n <vm>
+
 raz logout                         # clears ~/.raz
 
 raz-tui                            # interactive dashboard (q/Esc to quit)

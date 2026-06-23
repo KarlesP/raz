@@ -5,6 +5,7 @@
 //! (404 -> NotFound -> exit 3, 401 -> NotLoggedIn, etc.).
 
 use serde_json::Value;
+use std::time::Duration;
 
 use crate::auth::device_code::{self, TokenResponse};
 use crate::config::Subscription;
@@ -13,6 +14,23 @@ use crate::error::{RazError, Result};
 
 /// ARM endpoint host. Single-cloud only (public cloud); multi-cloud is out of scope.
 const ARM_ENDPOINT: &str = "https://management.azure.com";
+
+/// Default Azure region for resources raz creates.
+pub const DEFAULT_LOCATION: &str = "westeurope";
+
+/// Long-running-operation polling: interval and overall budget.
+const POLL_INTERVAL: Duration = Duration::from_secs(5);
+const POLL_MAX_ATTEMPTS: u32 = 240; // 240 * 5s = 20 min ceiling
+
+/// Map an ARM HTTP status onto a [`RazError`], preserving az-compatible exit codes.
+fn map_status(status: u16, path: &str, body: String) -> RazError {
+    match status {
+        401 => RazError::NotLoggedIn,
+        403 => RazError::Auth(format!("forbidden: {body}")),
+        404 => RazError::NotFound(path.to_string()),
+        _ => RazError::Http(format!("ARM {status}: {body}")),
+    }
+}
 
 /// API version used for subscription/tenant discovery during login.
 const SUBSCRIPTIONS_API_VERSION: &str = "2022-12-01";
@@ -100,12 +118,96 @@ impl ArmClient {
         }
 
         let body = resp.text().await.unwrap_or_default();
-        Err(match status.as_u16() {
-            401 => RazError::NotLoggedIn,
-            403 => RazError::Auth(format!("forbidden: {body}")),
-            404 => RazError::NotFound(path.to_string()),
-            _ => RazError::Http(format!("ARM {status}: {body}")),
-        })
+        Err(map_status(status.as_u16(), path, body))
+    }
+
+    /// PUT a resource body to `path` at `api_version` (create or update). Returns the parsed
+    /// response body. ARM creates/updates are long-running, so callers typically follow this
+    /// with [`ArmClient::wait_provisioning`].
+    pub async fn put(&self, path: &str, api_version: &str, body: &Value) -> Result<Value> {
+        let url = format!("{ARM_ENDPOINT}{path}?api-version={api_version}");
+        let resp = self
+            .http
+            .put(&url)
+            .bearer_auth(&self.token)
+            .json(body)
+            .send()
+            .await?;
+        let status = resp.status();
+        if status.is_success() {
+            let text = resp.text().await.unwrap_or_default();
+            return Ok(serde_json::from_str(&text).unwrap_or(Value::Null));
+        }
+        let text = resp.text().await.unwrap_or_default();
+        Err(map_status(status.as_u16(), path, text))
+    }
+
+    /// DELETE the resource at `path`. ARM deletes are long-running (202 Accepted), so callers
+    /// follow with [`ArmClient::wait_deleted`]. A 404 is treated as already-gone (success).
+    pub async fn delete(&self, path: &str, api_version: &str) -> Result<()> {
+        let url = format!("{ARM_ENDPOINT}{path}?api-version={api_version}");
+        let resp = self
+            .http
+            .delete(&url)
+            .bearer_auth(&self.token)
+            .send()
+            .await?;
+        let status = resp.status();
+        if status.is_success() || status.as_u16() == 404 {
+            return Ok(());
+        }
+        let text = resp.text().await.unwrap_or_default();
+        Err(map_status(status.as_u16(), path, text))
+    }
+
+    /// Poll a resource until its `properties.provisioningState` is terminal. Returns the final
+    /// resource on `Succeeded`, errors on `Failed`/`Canceled` or timeout.
+    pub async fn wait_provisioning(&self, path: &str, api_version: &str) -> Result<Value> {
+        for _ in 0..POLL_MAX_ATTEMPTS {
+            let resource = self.get(path, api_version).await?;
+            let state = resource
+                .get("properties")
+                .and_then(|p| p.get("provisioningState"))
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            match state {
+                "Succeeded" => return Ok(resource),
+                "Failed" | "Canceled" => {
+                    return Err(RazError::Http(format!("provisioning {state} for {path}")))
+                }
+                _ => tokio::time::sleep(POLL_INTERVAL).await,
+            }
+        }
+        Err(RazError::Http(format!(
+            "timed out waiting for {path} to provision"
+        )))
+    }
+
+    /// Poll until the resource at `path` no longer exists (delete completed).
+    pub async fn wait_deleted(&self, path: &str, api_version: &str) -> Result<()> {
+        for _ in 0..POLL_MAX_ATTEMPTS {
+            match self.get(path, api_version).await {
+                Err(RazError::NotFound(_)) => return Ok(()),
+                Ok(_) => tokio::time::sleep(POLL_INTERVAL).await,
+                Err(e) => return Err(e),
+            }
+        }
+        Err(RazError::Http(format!(
+            "timed out waiting for {path} to delete"
+        )))
+    }
+
+    /// Ensure a resource group exists in `location` (idempotent PUT). Resource-group PUT is not
+    /// long-running. Returns the resource group resource.
+    pub async fn ensure_resource_group(
+        &self,
+        subscription: &str,
+        resource_group: &str,
+        location: &str,
+    ) -> Result<Value> {
+        let path = format!("/subscriptions/{subscription}/resourcegroups/{resource_group}");
+        let body = serde_json::json!({ "location": location });
+        self.put(&path, "2021-04-01", &body).await
     }
 
     /// Discover the subscriptions the signed-in identity can see. Used by `raz login`.

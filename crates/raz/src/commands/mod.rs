@@ -10,9 +10,21 @@ pub mod vnet;
 use serde_json::Value;
 
 use raz_core::context::Context;
-use raz_core::error::Result;
+use raz_core::error::{usage, Result};
 use raz_core::output::{self, TableSpec};
 use raz_core::GlobalArgs;
+
+/// Parse repeated `key=value` `--tag` arguments into pairs.
+pub(crate) fn parse_tags(pairs: &[String]) -> Result<Vec<(String, String)>> {
+    pairs
+        .iter()
+        .map(|p| {
+            p.split_once('=')
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .ok_or_else(|| usage(format!("invalid --tag '{p}', expected key=value")))
+        })
+        .collect()
+}
 
 /// Render a command result to stdout honoring the global `--output` and `--query`,
 /// matching how az pipes every result through its output system.
