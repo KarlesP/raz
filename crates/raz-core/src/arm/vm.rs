@@ -10,6 +10,7 @@ use crate::error::{usage, RazError, Result};
 
 const API_VERSION: &str = "2024-07-01";
 const NETWORK_API: &str = "2023-09-01";
+const SKUS_API: &str = "2021-07-01";
 const PROVIDER: &str = "Microsoft.Compute/virtualMachines";
 
 /// Default small burstable size and Ubuntu 22.04 LTS (gen2) image for `raz vm create`.
@@ -80,6 +81,10 @@ pub async fn create(client: &ArmClient, args: &VmCreate<'_>) -> Result<Value> {
     client
         .ensure_provider_registered(subscription, "Microsoft.Compute")
         .await?;
+
+    // 0b. Pre-flight: reject an unavailable size now, before creating any resources, so the
+    // user gets a clear up-front error instead of a half-built deployment.
+    ensure_size_available(client, subscription, location, size).await?;
 
     // 1. Resource group.
     client
@@ -194,6 +199,56 @@ pub async fn create(client: &ArmClient, args: &VmCreate<'_>) -> Result<Value> {
     let mut final_state = client.wait_provisioning(&vm_path, API_VERSION).await?;
     super::enrich_resource(&mut final_state);
     Ok(final_state)
+}
+
+/// Pre-flight check that `size` can actually be deployed in `location` for this subscription,
+/// using the Compute resource-SKUs API. Returns a clear error when the size is not offered or
+/// is restricted (the `SkuNotAvailable` case the user hits at create time). Best-effort: if the
+/// SKUs query itself fails, we proceed rather than introducing a new failure mode.
+async fn ensure_size_available(
+    client: &ArmClient,
+    subscription: &str,
+    location: &str,
+    size: &str,
+) -> Result<()> {
+    // `$filter` must be URL-encoded (space -> %20, quote -> %27); `location` is a plain region.
+    let path = format!(
+        "/subscriptions/{subscription}/providers/Microsoft.Compute/skus?$filter=location%20eq%20%27{location}%27"
+    );
+    let body = match client.get(&path, SKUS_API).await {
+        Ok(b) => b,
+        Err(_) => return Ok(()),
+    };
+    let items = body.get("value").and_then(Value::as_array);
+    let Some(items) = items else { return Ok(()) };
+
+    for item in items {
+        if item.get("resourceType").and_then(Value::as_str) != Some("virtualMachines")
+            || item.get("name").and_then(Value::as_str) != Some(size)
+        {
+            continue;
+        }
+        // Found the size in this region; a Location-type restriction means it can't be deployed.
+        let restricted = item
+            .get("restrictions")
+            .and_then(Value::as_array)
+            .map(|rs| {
+                rs.iter()
+                    .any(|r| r.get("type").and_then(Value::as_str) == Some("Location"))
+            })
+            .unwrap_or(false);
+        return if restricted {
+            Err(usage(format!(
+                "VM size '{size}' is currently not available in '{location}' (capacity/subscription restriction). Choose another --size or -l location."
+            )))
+        } else {
+            Ok(())
+        };
+    }
+
+    Err(usage(format!(
+        "VM size '{size}' is not offered in location '{location}'. Choose another --size or -l location."
+    )))
 }
 
 /// `raz vm update` — patch an existing VM's size and/or tags (read-modify-write), then wait.

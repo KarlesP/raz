@@ -94,8 +94,9 @@ crates/
   subscription discovery), `logout`, `account` (list/show/set/list-tenants), `group`
   (create/list/show/delete), `vnet`/`vm` `list` + `show` (ARM GETs), and **`vnet`/`vm`
   `create` / `update` / `delete`** — real ARM PUT/DELETE with long-running-operation polling.
-  New resources default to **West Europe**; `vm create` auto-provisions the resource group,
-  virtual network/subnet, and NIC it needs.
+  New resources default to **West Europe**; `vm create` pre-flights VM-size availability for the
+  region (failing fast with a clear message before creating anything) and auto-provisions the
+  resource group, virtual network/subnet, and NIC it needs.
 - **Resource-provider auto-registration.** On the first `vnet`/`vm create` in a fresh
   subscription, raz registers `Microsoft.Network` / `Microsoft.Compute` and waits for them
   (just like `az` does silently), so create "just works".
