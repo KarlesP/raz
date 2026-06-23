@@ -17,30 +17,55 @@ command-module design and ships **two front-ends over one core library**:
 |---|---|---|
 | ![raz-tui login screen](docs/screenshots/tui-login.png) | ![raz-tui subscriptions list](docs/screenshots/tui-subscriptions.png) | ![raz-tui VM/VNet explorer](docs/screenshots/tui-resources.png) |
 
-## Benchmarks
+## Comparison with `az`
 
-`raz` is a single native binary; `az` is a Python application that spins up its interpreter and
-imports a large module tree on **every** invocation. For per-command overhead — everything a CLI
-does around the actual API call — the gap is dramatic.
+`raz` is a single native binary; `az` is a Python application that re-initializes its
+interpreter and imports a large module tree on **every** invocation.
 
-Median of 7 runs on Windows 10, `az` 2.85.0 vs `raz` 0.1.0 (release build), output discarded:
+### Per-invocation overhead (no network — apples-to-apples)
+
+Median of 7 runs, Windows 10, `az` 2.85.0 vs `raz` 0.1.0 (release build), output discarded:
 
 | Command | raz | az | Speed-up |
 |---|--:|--:|--:|
-| `--version` | 10 ms | 360 ms | **~36×** |
+| `--version` | 9 ms | 363 ms | **~40×** |
 | `--help` | 9 ms | 264 ms | **~29×** |
-| `account list` (reads local cache) | 12 ms | 472 ms | **~39×** |
+| `account list` (local cache) | 12 ms | 473 ms | **~39×** |
 
-> **Network-bound commands converge.** For live ARM reads such as `vm list` / `vnet list`, wall
-> time is dominated by the HTTPS round-trip to Azure (~1 s), so both CLIs land in the same
-> ballpark — but `raz` still trims the ~0.4 s `az` startup off every single call, which adds up
-> fast in scripts and loops.
+`raz` wins decisively wherever the CLI engine itself is the cost.
 
-**Fairness note.** `raz` implements a *slice* of `az`. The numbers above compare CLI overhead
-and read paths, not feature parity. `raz` does implement `vnet`/`vm` `create`/`update`/`delete`,
-but those are dominated by Azure's own provisioning time (seconds to minutes of ARM
-long-running operations), so they are not a meaningful CLI-speed differentiator — the startup
-win is what compounds across the many quick commands a session actually runs.
+### Live ARM commands — honest caveat
+
+For commands that call Azure Resource Manager (`group`/`vnet`/`vm` `list`, create, …), wall
+time is dominated by the network. **`raz` currently mints a fresh access token via a
+refresh-token exchange on _every_ ARM command** (an extra Entra round-trip), so a `*-list`
+lands around ~1.3 s and the startup advantage is offset; `az` reuses a cached MSAL token and
+skips that hop. Caching the per-tenant token in `~/.raz` (which already stores `expires_on`)
+is the planned fix — until then, `raz`'s real edge is the overhead numbers above, not live ARM
+latency. A clean head-to-head on identical subscriptions wasn't possible on the test machine
+(`az` and `raz` were signed in to different tenants).
+
+### Output shape
+
+`-o table/json/tsv` formatting matches `az`. Content differs by design — `raz` returns minimal,
+near-raw ARM JSON; `az` returns curated camelCase objects with more convenience fields:
+
+| `account show` | keys returned |
+|---|---|
+| **raz** | `id, name, tenant_id, is_default` |
+| **az** | `id, name, tenantId, isDefault, state, user, homeTenantId, managedByTenants, environmentName` |
+
+### Coverage
+
+| Capability | raz | az |
+|---|:--:|:--:|
+| login/logout · account · group | ✓ | ✓ |
+| vnet/vm `list`·`show`·`create`·`update`·`delete` | ✓ | ✓ |
+| resource-provider auto-register on create | ✓ | ✓ |
+| vm `start`/`stop` | stubbed | ✓ |
+| everything else (storage, aks, role, keyvault, …) | — | ✓ (full) |
+
+`raz` implements a deliberate slice; `az` remains the full product.
 
 ## Workspace
 
