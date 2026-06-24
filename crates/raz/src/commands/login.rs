@@ -19,17 +19,16 @@ pub struct LoginArgs {
     #[arg(long, short = 't', env = "AZURE_TENANT_ID")]
     pub tenant: Option<String>,
 
-    /// Sign in with a managed identity (Azure-hosted resources). For a user-assigned identity,
-    /// pass one of --client-id / --object-id / --resource-id.
-    #[arg(long)]
+    /// Log in using managed identity.
+    #[arg(long, short = 'i', help_heading = "Managed Identity")]
     pub identity: bool,
 
-    /// User-assigned managed-identity object (principal) id, with --identity.
-    #[arg(long)]
+    /// Object ID of the user-assigned managed identity.
+    #[arg(long, help_heading = "Managed Identity")]
     pub object_id: Option<String>,
 
-    /// User-assigned managed-identity resource id, with --identity.
-    #[arg(long)]
+    /// Resource ID of the user-assigned managed identity.
+    #[arg(long, help_heading = "Managed Identity")]
     pub resource_id: Option<String>,
 
     /// Sign in as a service principal (non-interactive) instead of the device-code flow.
