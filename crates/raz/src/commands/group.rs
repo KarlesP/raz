@@ -49,6 +49,7 @@ pub async fn run(command: GroupCommand, globals: GlobalArgs) -> Result<()> {
         }
         GroupCommand::Create { name, location } => {
             let (ctx, client, sub) = arm_context(globals).await?;
+            super::print_caf_recommendation("rg", &name, &location);
             let value = group::create(&client, &sub, &name, &location).await?;
             emit(&ctx, value, Some(&group::table_spec()))
         }

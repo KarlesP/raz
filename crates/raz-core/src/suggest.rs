@@ -114,6 +114,38 @@ const ABBREVIATIONS: &[(&str, &str)] = &[
     ("cr", "cr"),
 ];
 
+/// Common Azure region → short code (CAF-style), for nicer name examples.
+const REGION_ABBREVIATIONS: &[(&str, &str)] = &[
+    ("westeurope", "weu"),
+    ("northeurope", "neu"),
+    ("eastus", "eus"),
+    ("eastus2", "eus2"),
+    ("westus", "wus"),
+    ("westus2", "wus2"),
+    ("westus3", "wus3"),
+    ("centralus", "cus"),
+    ("uksouth", "uks"),
+    ("ukwest", "ukw"),
+    ("francecentral", "frc"),
+    ("germanywestcentral", "gwc"),
+    ("swedencentral", "sdc"),
+    ("switzerlandnorth", "szn"),
+    ("australiaeast", "aue"),
+    ("southeastasia", "sea"),
+    ("eastasia", "ea"),
+    ("japaneast", "jpe"),
+];
+
+/// Short code for an Azure region (falls back to the lowercased input).
+pub fn region_abbrev(region: &str) -> String {
+    let r = region.to_ascii_lowercase();
+    REGION_ABBREVIATIONS
+        .iter()
+        .find(|(name, _)| *name == r)
+        .map(|(_, abbr)| (*abbr).to_string())
+        .unwrap_or(r)
+}
+
 /// Resolve a resource `kind` (friendly name or abbreviation) to its CAF abbreviation; an
 /// unknown kind falls through as its own lowercased prefix.
 pub fn abbreviation(kind: &str) -> String {
