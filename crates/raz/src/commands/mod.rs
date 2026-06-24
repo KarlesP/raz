@@ -4,6 +4,7 @@
 pub mod account;
 pub mod ad;
 pub mod group;
+pub mod lock;
 pub mod login;
 pub mod logout;
 pub mod policy;
@@ -11,6 +12,7 @@ pub mod resource;
 pub mod rest;
 pub mod role;
 pub mod suggest;
+pub mod tag;
 pub mod vm;
 pub mod vnet;
 

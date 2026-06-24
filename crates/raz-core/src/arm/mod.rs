@@ -3,9 +3,11 @@
 
 pub mod client;
 pub mod group;
+pub mod lock;
 pub mod policy;
 pub mod resource;
 pub mod role;
+pub mod tag;
 pub mod vm;
 pub mod vnet;
 
