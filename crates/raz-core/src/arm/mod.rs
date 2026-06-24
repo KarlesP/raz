@@ -5,6 +5,7 @@ pub mod budget;
 pub mod client;
 pub mod deployment;
 pub mod group;
+pub mod keyvault;
 pub mod lock;
 pub mod policy;
 pub mod resource;
