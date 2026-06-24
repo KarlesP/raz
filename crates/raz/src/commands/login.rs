@@ -19,10 +19,18 @@ pub struct LoginArgs {
     #[arg(long, short = 't', env = "AZURE_TENANT_ID")]
     pub tenant: Option<String>,
 
-    /// Sign in with a managed identity via IMDS (Azure-hosted resources). Use --client-id for a
-    /// user-assigned identity.
+    /// Sign in with a managed identity (Azure-hosted resources). For a user-assigned identity,
+    /// pass one of --client-id / --object-id / --resource-id.
     #[arg(long)]
     pub identity: bool,
+
+    /// User-assigned managed-identity object (principal) id, with --identity.
+    #[arg(long)]
+    pub object_id: Option<String>,
+
+    /// User-assigned managed-identity resource id, with --identity.
+    #[arg(long)]
+    pub resource_id: Option<String>,
 
     /// Sign in as a service principal (non-interactive) instead of the device-code flow.
     #[arg(long)]
@@ -125,9 +133,21 @@ async fn identity_login(
     http: &reqwest::Client,
     args: &LoginArgs,
 ) -> Result<(String, TokenResponse)> {
-    println!("Signing in with managed identity via IMDS…");
-    let token = raz_core::auth::managed_identity::acquire(http, args.client_id.as_deref()).await?;
-    let tenant = args.tenant.clone().unwrap_or_default();
+    use raz_core::auth::managed_identity;
+    println!("Signing in with managed identity…");
+    let token = managed_identity::acquire(
+        http,
+        args.client_id.as_deref(),
+        args.object_id.as_deref(),
+        args.resource_id.as_deref(),
+    )
+    .await?;
+    // Match az: take the tenant from the token's `tid` claim (override with --tenant).
+    let tenant = args
+        .tenant
+        .clone()
+        .or_else(|| managed_identity::tenant_from_token(&token.access_token))
+        .unwrap_or_default();
     Ok((tenant, token))
 }
 
