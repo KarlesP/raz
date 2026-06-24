@@ -7,6 +7,7 @@ pub mod group;
 pub mod login;
 pub mod logout;
 pub mod rest;
+pub mod role;
 pub mod vm;
 pub mod vnet;
 

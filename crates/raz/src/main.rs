@@ -72,6 +72,11 @@ enum TopCommand {
         #[command(subcommand)]
         command: commands::group::GroupCommand,
     },
+    /// Manage RBAC role definitions and assignments.
+    Role {
+        #[command(subcommand)]
+        command: commands::role::RoleCommand,
+    },
     /// Manage virtual networks.
     Vnet {
         #[command(subcommand)]
@@ -114,6 +119,7 @@ async fn run(cli: Cli) -> Result<(), RazError> {
         TopCommand::Account { command } => commands::account::run(command, globals).await,
         TopCommand::Ad { command } => commands::ad::run(command, globals).await,
         TopCommand::Group { command } => commands::group::run(command, globals).await,
+        TopCommand::Role { command } => commands::role::run(command, globals).await,
         TopCommand::Vnet { command } => commands::vnet::run(command, globals).await,
         TopCommand::Vm { command } => commands::vm::run(command, globals).await,
         TopCommand::Rest(args) => commands::rest::run(args, globals).await,
