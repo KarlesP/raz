@@ -7,6 +7,7 @@ mod commands;
 mod schema;
 
 use clap::{Args, Parser, Subcommand};
+use clap_complete::Shell;
 
 use raz_core::error::RazError;
 use raz_core::{GlobalArgs, OutputFormat};
@@ -149,6 +150,11 @@ enum TopCommand {
         #[command(subcommand)]
         command: commands::aks::AksCommand,
     },
+    /// Print a shell completion script (bash, zsh, fish, powershell, elvish).
+    Completion {
+        #[arg(value_enum)]
+        shell: Shell,
+    },
 }
 
 #[tokio::main]
@@ -195,5 +201,6 @@ async fn run(cli: Cli) -> Result<(), RazError> {
         TopCommand::Keyvault { command } => commands::keyvault::run(command, globals).await,
         TopCommand::Network { command } => commands::network::run(command, globals).await,
         TopCommand::Aks { command } => commands::aks::run(command, globals).await,
+        TopCommand::Completion { shell } => commands::completion::run(shell),
     }
 }
