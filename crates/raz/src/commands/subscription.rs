@@ -29,6 +29,20 @@ pub enum SubscriptionCommand {
         #[arg(long)]
         alias: String,
     },
+    /// Delete a create-alias record (does not cancel the subscription itself).
+    Delete {
+        #[arg(long)]
+        alias: String,
+    },
+    /// Rename a subscription's display name.
+    Rename {
+        /// Subscription id to rename.
+        #[arg(long)]
+        id: String,
+        /// New display name.
+        #[arg(long)]
+        name: String,
+    },
 }
 
 pub async fn run(command: SubscriptionCommand, globals: GlobalArgs) -> Result<()> {
@@ -49,6 +63,17 @@ pub async fn run(command: SubscriptionCommand, globals: GlobalArgs) -> Result<()
             let (ctx, client, _sub) = arm_context(globals).await?;
             let value = subscription::show(&client, &alias).await?;
             emit(&ctx, value, Some(&subscription::table_spec()))
+        }
+        SubscriptionCommand::Delete { alias } => {
+            let (_ctx, client, _sub) = arm_context(globals).await?;
+            subscription::delete_alias(&client, &alias).await?;
+            println!("Deleted subscription alias '{alias}'.");
+            Ok(())
+        }
+        SubscriptionCommand::Rename { id, name } => {
+            let (ctx, client, _sub) = arm_context(globals).await?;
+            let value = subscription::rename(&client, &id, &name).await?;
+            emit(&ctx, value, None)
         }
     }
 }

@@ -26,12 +26,7 @@ const POLL_MAX_ATTEMPTS: u32 = 240; // 240 * 5s = 20 min ceiling
 
 /// Map an ARM HTTP status onto a [`RazError`], preserving az-compatible exit codes.
 fn map_status(status: u16, path: &str, body: String) -> RazError {
-    match status {
-        401 => RazError::NotLoggedIn,
-        403 => RazError::Auth(format!("forbidden: {body}")),
-        404 => RazError::NotFound(path.to_string()),
-        _ => RazError::Http(format!("ARM {status}: {body}")),
-    }
+    crate::error::map_http_status("ARM", status, path, body)
 }
 
 /// API version used for subscription/tenant discovery during login.

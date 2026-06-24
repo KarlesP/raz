@@ -55,3 +55,21 @@ pub async fn show(client: &ArmClient, alias: &str) -> Result<Value> {
     let body = client.get(&alias_path(alias), API_VERSION).await?;
     Ok(flatten(&body))
 }
+
+/// `raz subscription delete` — remove the create-alias record. (Does not cancel the subscription
+/// itself; the subscription, once created, persists.)
+pub async fn delete_alias(client: &ArmClient, alias: &str) -> Result<()> {
+    client.delete(&alias_path(alias), API_VERSION).await
+}
+
+/// `raz subscription rename` — change a subscription's display name.
+pub async fn rename(client: &ArmClient, subscription_id: &str, name: &str) -> Result<Value> {
+    let path = format!("/subscriptions/{subscription_id}/providers/Microsoft.Subscription/rename");
+    client
+        .post(
+            &path,
+            API_VERSION,
+            Some(&json!({ "subscriptionName": name })),
+        )
+        .await
+}

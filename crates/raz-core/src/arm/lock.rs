@@ -18,16 +18,15 @@ pub fn table_spec() -> TableSpec {
     ]
 }
 
-/// Resolve the lock scope: a resource id wins, else a resource group, else the subscription.
+/// Resolve the lock scope: a resource id wins, else fall back to the subscription/RG scope.
 pub fn scope(
     subscription: &str,
     resource_group: Option<&str>,
     resource_id: Option<&str>,
 ) -> String {
-    match (resource_id, resource_group) {
-        (Some(id), _) => id.to_string(),
-        (None, Some(rg)) => format!("/subscriptions/{subscription}/resourceGroups/{rg}"),
-        (None, None) => format!("/subscriptions/{subscription}"),
+    match resource_id {
+        Some(id) => id.to_string(),
+        None => super::role::scope(subscription, resource_group),
     }
 }
 
