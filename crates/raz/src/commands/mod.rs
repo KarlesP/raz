@@ -6,6 +6,7 @@ pub mod ad;
 pub mod group;
 pub mod login;
 pub mod logout;
+pub mod rest;
 pub mod vm;
 pub mod vnet;
 
