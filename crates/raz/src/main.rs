@@ -134,6 +134,11 @@ enum TopCommand {
         #[command(subcommand)]
         command: commands::storage::StorageCommand,
     },
+    /// Manage key vaults and secrets.
+    Keyvault {
+        #[command(subcommand)]
+        command: commands::keyvault::KeyvaultCommand,
+    },
 }
 
 #[tokio::main]
@@ -177,5 +182,6 @@ async fn run(cli: Cli) -> Result<(), RazError> {
         TopCommand::Budget { command } => commands::budget::run(command, globals).await,
         TopCommand::Deployment { command } => commands::deployment::run(command, globals).await,
         TopCommand::Storage { command } => commands::storage::run(command, globals).await,
+        TopCommand::Keyvault { command } => commands::keyvault::run(command, globals).await,
     }
 }

@@ -121,4 +121,29 @@ impl Context {
         .await?;
         Ok(tok.access_token)
     }
+
+    /// Mint a Key Vault data-plane token for the active subscription's tenant, for
+    /// `raz keyvault secret ...`. Requires an interactive login (a refresh token).
+    pub async fn vault_token(&self) -> Result<String> {
+        let tenant = self
+            .active_subscription()
+            .map(|s| s.tenant_id.clone())
+            .or_else(|| self.profile.tenant_id.clone())
+            .ok_or(RazError::NotLoggedIn)?;
+        let cached = self.profile.token.as_ref().ok_or(RazError::NotLoggedIn)?;
+        let refresh = cached.refresh_token.as_ref().ok_or_else(|| {
+            RazError::Auth(
+                "Key Vault secrets require an interactive `raz login` (no refresh token in this session)"
+                    .into(),
+            )
+        })?;
+        let tok = crate::auth::device_code::exchange_refresh_token(
+            &self.http,
+            &tenant,
+            refresh,
+            crate::auth::device_code::KEYVAULT_SCOPE,
+        )
+        .await?;
+        Ok(tok.access_token)
+    }
 }

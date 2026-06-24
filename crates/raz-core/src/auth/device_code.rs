@@ -20,6 +20,9 @@ pub const DEFAULT_SCOPE: &str =
 /// Microsoft Graph scope, for app/federated-credential management (`raz ad ...`).
 pub const GRAPH_SCOPE: &str = "https://graph.microsoft.com/.default offline_access openid profile";
 
+/// Key Vault data-plane scope, for secret get/set (`raz keyvault secret ...`).
+pub const KEYVAULT_SCOPE: &str = "https://vault.azure.net/.default offline_access openid profile";
+
 fn devicecode_url(tenant: &str) -> String {
     format!("https://login.microsoftonline.com/{tenant}/oauth2/v2.0/devicecode")
 }
