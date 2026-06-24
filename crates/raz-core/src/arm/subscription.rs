@@ -8,6 +8,41 @@ use crate::error::Result;
 use crate::output::TableSpec;
 
 const API_VERSION: &str = "2021-10-01";
+const LOCATIONS_API: &str = "2022-12-01";
+const MGMT_GROUPS_API: &str = "2020-05-01";
+
+/// `account list-locations` — regions available to the subscription.
+pub async fn list_locations(client: &ArmClient, subscription: &str) -> Result<Value> {
+    let body = client
+        .get(
+            &format!("/subscriptions/{subscription}/locations"),
+            LOCATIONS_API,
+        )
+        .await?;
+    Ok(super::map_list(&body, |l| {
+        json!({
+            "name": l.get("name").and_then(Value::as_str).unwrap_or(""),
+            "displayName": l.get("displayName").and_then(Value::as_str).unwrap_or(""),
+            "regionalDisplayName": l.get("regionalDisplayName").and_then(Value::as_str).unwrap_or(""),
+        })
+    }))
+}
+
+/// `account management-group list` — management groups the identity can see (tenant scope).
+pub async fn list_management_groups(client: &ArmClient) -> Result<Value> {
+    let body = client
+        .get(
+            "/providers/Microsoft.Management/managementGroups",
+            MGMT_GROUPS_API,
+        )
+        .await?;
+    Ok(super::map_list(&body, |g| {
+        json!({
+            "name": g.get("name").and_then(Value::as_str).unwrap_or(""),
+            "displayName": g.pointer("/properties/displayName").and_then(Value::as_str).unwrap_or(""),
+        })
+    }))
+}
 
 pub fn table_spec() -> TableSpec {
     vec![
