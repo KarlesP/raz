@@ -143,6 +143,25 @@ impl ArmClient {
         Err(map_status(status.as_u16(), path, text))
     }
 
+    /// POST `path` (with an optional JSON body) and return the parsed response — for read-style
+    /// POST APIs such as PolicyInsights `summarize`.
+    pub async fn post(&self, path: &str, api_version: &str, body: Option<&Value>) -> Result<Value> {
+        let url = format!("{ARM_ENDPOINT}{path}?api-version={api_version}");
+        let mut req = self.http.post(&url).bearer_auth(&self.token);
+        req = match body {
+            Some(b) => req.json(b),
+            None => req.header(reqwest::header::CONTENT_LENGTH, 0),
+        };
+        let resp = req.send().await?;
+        let status = resp.status();
+        if status.is_success() {
+            let text = resp.text().await.unwrap_or_default();
+            return Ok(serde_json::from_str(&text).unwrap_or(Value::Null));
+        }
+        let text = resp.text().await.unwrap_or_default();
+        Err(map_status(status.as_u16(), path, text))
+    }
+
     /// DELETE the resource at `path`. ARM deletes are long-running (202 Accepted), so callers
     /// follow with [`ArmClient::wait_deleted`]. A 404 is treated as already-gone (success).
     pub async fn delete(&self, path: &str, api_version: &str) -> Result<()> {
