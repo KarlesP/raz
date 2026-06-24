@@ -77,6 +77,11 @@ enum TopCommand {
         #[command(subcommand)]
         command: commands::role::RoleCommand,
     },
+    /// Generic CRUD over any resource type/id.
+    Resource {
+        #[command(subcommand)]
+        command: commands::resource::ResourceCommand,
+    },
     /// Manage virtual networks.
     Vnet {
         #[command(subcommand)]
@@ -89,6 +94,11 @@ enum TopCommand {
     },
     /// Make an arbitrary authenticated ARM/Graph REST call.
     Rest(commands::rest::RestArgs),
+    /// Suggest standard tags and CAF-compliant resource names (offline).
+    Suggest {
+        #[command(subcommand)]
+        command: commands::suggest::SuggestCommand,
+    },
     /// Scan governance / policy assignments + compliance.
     Policy {
         #[command(subcommand)]
@@ -125,9 +135,11 @@ async fn run(cli: Cli) -> Result<(), RazError> {
         TopCommand::Ad { command } => commands::ad::run(command, globals).await,
         TopCommand::Group { command } => commands::group::run(command, globals).await,
         TopCommand::Role { command } => commands::role::run(command, globals).await,
+        TopCommand::Resource { command } => commands::resource::run(command, globals).await,
         TopCommand::Vnet { command } => commands::vnet::run(command, globals).await,
         TopCommand::Vm { command } => commands::vm::run(command, globals).await,
         TopCommand::Rest(args) => commands::rest::run(args, globals).await,
+        TopCommand::Suggest { command } => commands::suggest::run(command, globals).await,
         TopCommand::Policy { command } => commands::policy::run(command, globals).await,
     }
 }

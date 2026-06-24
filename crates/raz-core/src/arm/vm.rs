@@ -22,6 +22,15 @@ fn vm_path(subscription: &str, resource_group: &str, name: &str) -> String {
     )
 }
 
+/// Compute resource-SKUs query filtered to one region (used by the create pre-flight and
+/// `list-sizes`).
+fn skus_filter_path(subscription: &str, location: &str) -> String {
+    format!(
+        "/subscriptions/{subscription}/providers/Microsoft.Compute/skus?{}",
+        crate::odata::odata_eq("location", location)
+    )
+}
+
 /// Inputs for [`create`]. Network resources default to `<vm>-vnet` / `default` subnet and are
 /// created if absent. Exactly one of `ssh_key` / `admin_password` must be provided.
 pub struct VmCreate<'a> {
@@ -211,11 +220,10 @@ async fn ensure_size_available(
     location: &str,
     size: &str,
 ) -> Result<()> {
-    // `$filter` must be URL-encoded (space -> %20, quote -> %27); `location` is a plain region.
-    let path = format!(
-        "/subscriptions/{subscription}/providers/Microsoft.Compute/skus?$filter=location%20eq%20%27{location}%27"
-    );
-    let body = match client.get(&path, SKUS_API).await {
+    let body = match client
+        .get(&skus_filter_path(subscription, location), SKUS_API)
+        .await
+    {
         Ok(b) => b,
         Err(_) => return Ok(()),
     };
@@ -346,10 +354,9 @@ pub async fn deallocate(
 /// `raz vm list-sizes` — the VM sizes offered in `location`, from the Compute resource-SKUs API
 /// (the same source the create pre-flight uses). Projects name + vCPUs + memory.
 pub async fn list_sizes(client: &ArmClient, subscription: &str, location: &str) -> Result<Value> {
-    let path = format!(
-        "/subscriptions/{subscription}/providers/Microsoft.Compute/skus?$filter=location%20eq%20%27{location}%27"
-    );
-    let body = client.get(&path, SKUS_API).await?;
+    let body = client
+        .get(&skus_filter_path(subscription, location), SKUS_API)
+        .await?;
     let items = body
         .get("value")
         .and_then(Value::as_array)
