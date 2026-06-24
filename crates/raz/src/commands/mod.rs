@@ -4,6 +4,7 @@
 pub mod account;
 pub mod ad;
 pub mod aks;
+pub mod appservice;
 pub mod budget;
 pub mod completion;
 pub mod deployment;
@@ -24,6 +25,7 @@ pub mod suggest;
 pub mod tag;
 pub mod vm;
 pub mod vnet;
+pub mod webapp;
 
 use serde_json::Value;
 

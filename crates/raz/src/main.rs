@@ -155,6 +155,16 @@ enum TopCommand {
         #[command(subcommand)]
         command: commands::monitor::MonitorCommand,
     },
+    /// Manage App Service web apps.
+    Webapp {
+        #[command(subcommand)]
+        command: commands::webapp::WebappCommand,
+    },
+    /// Manage App Service plans.
+    Appservice {
+        #[command(subcommand)]
+        command: commands::appservice::AppserviceCommand,
+    },
     /// Print a shell completion script (bash, zsh, fish, powershell, elvish).
     Completion {
         #[arg(value_enum)]
@@ -207,6 +217,8 @@ async fn run(cli: Cli) -> Result<(), RazError> {
         TopCommand::Network { command } => commands::network::run(command, globals).await,
         TopCommand::Aks { command } => commands::aks::run(command, globals).await,
         TopCommand::Monitor { command } => commands::monitor::run(command, globals).await,
+        TopCommand::Webapp { command } => commands::webapp::run(command, globals).await,
+        TopCommand::Appservice { command } => commands::appservice::run(command, globals).await,
         TopCommand::Completion { shell } => commands::completion::run(shell),
     }
 }
