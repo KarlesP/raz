@@ -71,3 +71,14 @@ impl From<serde_json::Error> for RazError {
 pub fn usage(msg: impl fmt::Display) -> RazError {
     RazError::Usage(msg.to_string())
 }
+
+/// Map an HTTP status from an Azure service (`service` = "ARM"/"Graph") onto a [`RazError`],
+/// preserving az-compatible exit codes. Shared by the ARM and Graph clients.
+pub(crate) fn map_http_status(service: &str, status: u16, path: &str, body: String) -> RazError {
+    match status {
+        401 => RazError::NotLoggedIn,
+        403 => RazError::Auth(format!("forbidden: {body}")),
+        404 => RazError::NotFound(path.to_string()),
+        _ => RazError::Http(format!("{service} {status}: {body}")),
+    }
+}
