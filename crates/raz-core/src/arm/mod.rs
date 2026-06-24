@@ -1,6 +1,7 @@
 //! Azure Resource Manager access. [`client::ArmClient`] is the REST transport; [`group`],
 //! [`vnet`], and [`vm`] hold the per-service operations (one module per az command group).
 
+pub mod aks;
 pub mod budget;
 pub mod client;
 pub mod deployment;
