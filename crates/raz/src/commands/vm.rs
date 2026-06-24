@@ -91,6 +91,11 @@ pub enum VmCommand {
         #[arg(long, short = 'n')]
         name: String,
     },
+    /// List the VM sizes available in a location.
+    ListSizes {
+        #[arg(long, short = 'l', default_value = DEFAULT_LOCATION)]
+        location: String,
+    },
 }
 
 pub async fn run(command: VmCommand, globals: GlobalArgs) -> Result<()> {
@@ -203,6 +208,19 @@ pub async fn run(command: VmCommand, globals: GlobalArgs) -> Result<()> {
             vm::deallocate(&client, &sub, &resource_group, &name).await?;
             println!("Deallocated VM '{name}'.");
             Ok(())
+        }
+        VmCommand::ListSizes { location } => {
+            let (ctx, client, sub) = arm_context(globals).await?;
+            let value = vm::list_sizes(&client, &sub, &location).await?;
+            emit(
+                &ctx,
+                value,
+                Some(&vec![
+                    ("Name", "name"),
+                    ("vCPUs", "vCPUs"),
+                    ("MemoryGB", "memoryGB"),
+                ]),
+            )
         }
     }
 }
