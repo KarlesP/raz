@@ -12,6 +12,7 @@ pub mod keyvault;
 pub mod lock;
 pub mod login;
 pub mod logout;
+pub mod monitor;
 pub mod network;
 pub mod policy;
 pub mod resource;

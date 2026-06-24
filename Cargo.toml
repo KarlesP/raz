@@ -29,6 +29,7 @@ uuid = { version = "1", features = ["v4"] }
 base64 = "0.22"
 jmespath = "0.3"
 serde_yaml = "0.9"
+time = { version = "0.3", features = ["formatting"] }
 
 # TUI stack
 ratatui = "0.29"

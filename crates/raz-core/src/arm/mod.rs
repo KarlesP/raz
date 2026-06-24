@@ -8,6 +8,7 @@ pub mod deployment;
 pub mod group;
 pub mod keyvault;
 pub mod lock;
+pub mod monitor;
 pub mod network;
 pub mod policy;
 pub mod resource;
