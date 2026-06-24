@@ -62,10 +62,25 @@ enum TopCommand {
         #[command(subcommand)]
         command: commands::account::AccountCommand,
     },
+    /// Microsoft Entra directory operations (app federated credentials).
+    Ad {
+        #[command(subcommand)]
+        command: commands::ad::AdCommand,
+    },
     /// Manage resource groups.
     Group {
         #[command(subcommand)]
         command: commands::group::GroupCommand,
+    },
+    /// Manage RBAC role definitions and assignments.
+    Role {
+        #[command(subcommand)]
+        command: commands::role::RoleCommand,
+    },
+    /// Generic CRUD over any resource type/id.
+    Resource {
+        #[command(subcommand)]
+        command: commands::resource::ResourceCommand,
     },
     /// Manage virtual networks.
     Vnet {
@@ -76,6 +91,18 @@ enum TopCommand {
     Vm {
         #[command(subcommand)]
         command: commands::vm::VmCommand,
+    },
+    /// Make an arbitrary authenticated ARM/Graph REST call.
+    Rest(commands::rest::RestArgs),
+    /// Suggest standard tags and CAF-compliant resource names (offline).
+    Suggest {
+        #[command(subcommand)]
+        command: commands::suggest::SuggestCommand,
+    },
+    /// Scan governance / policy assignments + compliance.
+    Policy {
+        #[command(subcommand)]
+        command: commands::policy::PolicyCommand,
     },
 }
 
@@ -105,8 +132,14 @@ async fn run(cli: Cli) -> Result<(), RazError> {
         TopCommand::Login(args) => commands::login::run(args, &globals).await,
         TopCommand::Logout => commands::logout::run().await,
         TopCommand::Account { command } => commands::account::run(command, globals).await,
+        TopCommand::Ad { command } => commands::ad::run(command, globals).await,
         TopCommand::Group { command } => commands::group::run(command, globals).await,
+        TopCommand::Role { command } => commands::role::run(command, globals).await,
+        TopCommand::Resource { command } => commands::resource::run(command, globals).await,
         TopCommand::Vnet { command } => commands::vnet::run(command, globals).await,
         TopCommand::Vm { command } => commands::vm::run(command, globals).await,
+        TopCommand::Rest(args) => commands::rest::run(args, globals).await,
+        TopCommand::Suggest { command } => commands::suggest::run(command, globals).await,
+        TopCommand::Policy { command } => commands::policy::run(command, globals).await,
     }
 }

@@ -59,7 +59,13 @@ pub async fn discover_all(
     let mut subs: Vec<Subscription> = Vec::new();
     if let Some(refresh) = &token.refresh_token {
         for tenant in &tenants {
-            let Ok(tok) = device_code::exchange_refresh_token(http, &tenant.id, refresh).await
+            let Ok(tok) = device_code::exchange_refresh_token(
+                http,
+                &tenant.id,
+                refresh,
+                device_code::DEFAULT_SCOPE,
+            )
+            .await
             else {
                 continue; // tenant not redeemable for this identity; skip it
             };
@@ -137,6 +143,25 @@ impl ArmClient {
         Err(map_status(status.as_u16(), path, text))
     }
 
+    /// POST `path` (with an optional JSON body) and return the parsed response — for read-style
+    /// POST APIs such as PolicyInsights `summarize`.
+    pub async fn post(&self, path: &str, api_version: &str, body: Option<&Value>) -> Result<Value> {
+        let url = format!("{ARM_ENDPOINT}{path}?api-version={api_version}");
+        let mut req = self.http.post(&url).bearer_auth(&self.token);
+        req = match body {
+            Some(b) => req.json(b),
+            None => req.header(reqwest::header::CONTENT_LENGTH, 0),
+        };
+        let resp = req.send().await?;
+        let status = resp.status();
+        if status.is_success() {
+            let text = resp.text().await.unwrap_or_default();
+            return Ok(serde_json::from_str(&text).unwrap_or(Value::Null));
+        }
+        let text = resp.text().await.unwrap_or_default();
+        Err(map_status(status.as_u16(), path, text))
+    }
+
     /// DELETE the resource at `path`. ARM deletes are long-running (202 Accepted), so callers
     /// follow with [`ArmClient::wait_deleted`]. A 404 is treated as already-gone (success).
     pub async fn delete(&self, path: &str, api_version: &str) -> Result<()> {
@@ -190,6 +215,60 @@ impl ArmClient {
         Err(RazError::Http(format!(
             "timed out waiting for {path} to delete"
         )))
+    }
+
+    /// POST an action endpoint (e.g. a VM `/start`) and wait for it to finish. Actions are
+    /// long-running: a 202 carries an `Azure-AsyncOperation` (or `Location`) header pointing at
+    /// a status URL that we poll until terminal. A 2xx without a header is treated as done.
+    pub async fn post_action(&self, path: &str, api_version: &str) -> Result<()> {
+        let url = format!("{ARM_ENDPOINT}{path}?api-version={api_version}");
+        let resp = self
+            .http
+            .post(&url)
+            .bearer_auth(&self.token)
+            .header(reqwest::header::CONTENT_LENGTH, 0)
+            .send()
+            .await?;
+        let status = resp.status();
+        if !status.is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            return Err(map_status(status.as_u16(), path, body));
+        }
+        let op_url = resp
+            .headers()
+            .get("azure-asyncoperation")
+            .or_else(|| resp.headers().get("location"))
+            .and_then(|h| h.to_str().ok())
+            .map(str::to_string);
+        match op_url {
+            Some(op) => self.poll_async_operation(&op).await,
+            None => Ok(()), // synchronous completion
+        }
+    }
+
+    /// Poll an async-operation status URL until its `status` is terminal.
+    async fn poll_async_operation(&self, url: &str) -> Result<()> {
+        for _ in 0..POLL_MAX_ATTEMPTS {
+            let resp = self.http.get(url).bearer_auth(&self.token).send().await?;
+            if !resp.status().is_success() {
+                let body = resp.text().await.unwrap_or_default();
+                return Err(RazError::Http(format!("operation poll failed: {body}")));
+            }
+            let body = resp.json::<Value>().await.unwrap_or(Value::Null);
+            match body.get("status").and_then(Value::as_str).unwrap_or("") {
+                "Succeeded" => return Ok(()),
+                "Failed" | "Canceled" => {
+                    return Err(RazError::Http(format!(
+                        "operation {}",
+                        body.get("status")
+                            .and_then(Value::as_str)
+                            .unwrap_or("failed")
+                    )))
+                }
+                _ => tokio::time::sleep(POLL_INTERVAL).await,
+            }
+        }
+        Err(RazError::Http("timed out waiting for operation".into()))
     }
 
     /// Ensure a resource group exists in `location` (idempotent PUT). Resource-group PUT is not

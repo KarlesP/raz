@@ -2,6 +2,7 @@
 //! that turns its token response into a cache entry. Backs `raz login` / `raz logout`.
 
 pub mod device_code;
+pub mod sp;
 
 use crate::config::CachedToken;
 use device_code::TokenResponse;

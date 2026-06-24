@@ -1,7 +1,7 @@
 //! Virtual machine operations (az `vm`). `create` orchestrates the resources a VM needs
 //! (resource group, virtual network + subnet, NIC) then the VM, defaulting to West Europe
 //! and a small Ubuntu image. `update` patches size/tags; `delete` removes the VM.
-//! `start`/`stop` are not yet implemented (they are action-style long-running operations).
+//! `start`/`stop`/`restart`/`deallocate` POST the VM power actions and poll the operation.
 
 use serde_json::{json, Value};
 
@@ -19,6 +19,15 @@ pub const DEFAULT_VM_SIZE: &str = "Standard_B1s";
 fn vm_path(subscription: &str, resource_group: &str, name: &str) -> String {
     format!(
         "/subscriptions/{subscription}/resourceGroups/{resource_group}/providers/{PROVIDER}/{name}"
+    )
+}
+
+/// Compute resource-SKUs query filtered to one region (used by the create pre-flight and
+/// `list-sizes`).
+fn skus_filter_path(subscription: &str, location: &str) -> String {
+    format!(
+        "/subscriptions/{subscription}/providers/Microsoft.Compute/skus?{}",
+        crate::odata::odata_eq("location", location)
     )
 }
 
@@ -211,11 +220,10 @@ async fn ensure_size_available(
     location: &str,
     size: &str,
 ) -> Result<()> {
-    // `$filter` must be URL-encoded (space -> %20, quote -> %27); `location` is a plain region.
-    let path = format!(
-        "/subscriptions/{subscription}/providers/Microsoft.Compute/skus?$filter=location%20eq%20%27{location}%27"
-    );
-    let body = match client.get(&path, SKUS_API).await {
+    let body = match client
+        .get(&skus_filter_path(subscription, location), SKUS_API)
+        .await
+    {
         Ok(b) => b,
         Err(_) => return Ok(()),
     };
@@ -306,12 +314,80 @@ pub async fn delete(
     client.wait_deleted(&path, API_VERSION).await
 }
 
-/// `raz vm start` — not yet implemented (POST `/start`, then poll the operation).
-pub async fn start(_name: &str) -> Result<Value> {
-    Err(RazError::NotImplemented("vm start".into()))
+/// Power actions: POST the VM action endpoint and wait for the long-running op to finish.
+async fn power_action(
+    client: &ArmClient,
+    subscription: &str,
+    resource_group: &str,
+    name: &str,
+    action: &str,
+) -> Result<()> {
+    let path = format!("{}/{action}", vm_path(subscription, resource_group, name));
+    client.post_action(&path, API_VERSION).await
 }
 
-/// `raz vm stop` — not yet implemented (POST `/powerOff`, then poll the operation).
-pub async fn stop(_name: &str) -> Result<Value> {
-    Err(RazError::NotImplemented("vm stop".into()))
+/// `raz vm start`.
+pub async fn start(client: &ArmClient, subscription: &str, rg: &str, name: &str) -> Result<()> {
+    power_action(client, subscription, rg, name, "start").await
+}
+
+/// `raz vm stop` — power off (still billed for the allocation; use `deallocate` to stop billing).
+pub async fn stop(client: &ArmClient, subscription: &str, rg: &str, name: &str) -> Result<()> {
+    power_action(client, subscription, rg, name, "powerOff").await
+}
+
+/// `raz vm restart`.
+pub async fn restart(client: &ArmClient, subscription: &str, rg: &str, name: &str) -> Result<()> {
+    power_action(client, subscription, rg, name, "restart").await
+}
+
+/// `raz vm deallocate` — stop and release the compute (stops compute billing).
+pub async fn deallocate(
+    client: &ArmClient,
+    subscription: &str,
+    rg: &str,
+    name: &str,
+) -> Result<()> {
+    power_action(client, subscription, rg, name, "deallocate").await
+}
+
+/// `raz vm list-sizes` — the VM sizes offered in `location`, from the Compute resource-SKUs API
+/// (the same source the create pre-flight uses). Projects name + vCPUs + memory.
+pub async fn list_sizes(client: &ArmClient, subscription: &str, location: &str) -> Result<Value> {
+    let body = client
+        .get(&skus_filter_path(subscription, location), SKUS_API)
+        .await?;
+    let items = body
+        .get("value")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+
+    let mut sizes = Vec::new();
+    for item in &items {
+        if item.get("resourceType").and_then(Value::as_str) != Some("virtualMachines") {
+            continue;
+        }
+        let Some(name) = item.get("name").and_then(Value::as_str) else {
+            continue;
+        };
+        let cap = |key: &str| -> String {
+            item.get("capabilities")
+                .and_then(Value::as_array)
+                .and_then(|caps| {
+                    caps.iter()
+                        .find(|c| c.get("name").and_then(Value::as_str) == Some(key))
+                })
+                .and_then(|c| c.get("value").and_then(Value::as_str))
+                .unwrap_or("")
+                .to_string()
+        };
+        sizes.push(json!({
+            "name": name,
+            "vCPUs": cap("vCPUs"),
+            "memoryGB": cap("MemoryGB"),
+            "location": location,
+        }));
+    }
+    Ok(Value::Array(sizes))
 }

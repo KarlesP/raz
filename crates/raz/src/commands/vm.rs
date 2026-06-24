@@ -63,15 +63,38 @@ pub enum VmCommand {
         #[arg(long, short = 'n')]
         name: String,
     },
-    /// Start a virtual machine (not yet implemented).
+    /// Start a virtual machine.
     Start {
+        #[arg(long, short = 'g')]
+        resource_group: String,
         #[arg(long, short = 'n')]
         name: String,
     },
-    /// Stop (power off) a virtual machine (not yet implemented).
+    /// Stop (power off) a virtual machine. Still billed; use `deallocate` to stop compute billing.
     Stop {
+        #[arg(long, short = 'g')]
+        resource_group: String,
         #[arg(long, short = 'n')]
         name: String,
+    },
+    /// Restart a virtual machine.
+    Restart {
+        #[arg(long, short = 'g')]
+        resource_group: String,
+        #[arg(long, short = 'n')]
+        name: String,
+    },
+    /// Deallocate a virtual machine (stops compute billing).
+    Deallocate {
+        #[arg(long, short = 'g')]
+        resource_group: String,
+        #[arg(long, short = 'n')]
+        name: String,
+    },
+    /// List the VM sizes available in a location.
+    ListSizes {
+        #[arg(long, short = 'l', default_value = DEFAULT_LOCATION)]
+        location: String,
     },
 }
 
@@ -100,6 +123,7 @@ pub async fn run(command: VmCommand, globals: GlobalArgs) -> Result<()> {
             admin_password,
         } => {
             let (ctx, client, sub) = arm_context(globals).await?;
+            super::print_caf_recommendation("vm", &name, &location);
             eprintln!("Creating VM '{name}' in {location} (this can take a few minutes)…");
             let value = vm::create(
                 &client,
@@ -146,7 +170,58 @@ pub async fn run(command: VmCommand, globals: GlobalArgs) -> Result<()> {
             println!("Deleted VM '{name}'.");
             Ok(())
         }
-        VmCommand::Start { name } => vm::start(&name).await.map(|_| ()),
-        VmCommand::Stop { name } => vm::stop(&name).await.map(|_| ()),
+        VmCommand::Start {
+            resource_group,
+            name,
+        } => {
+            let (_ctx, client, sub) = arm_context(globals).await?;
+            eprintln!("Starting VM '{name}'…");
+            vm::start(&client, &sub, &resource_group, &name).await?;
+            println!("Started VM '{name}'.");
+            Ok(())
+        }
+        VmCommand::Stop {
+            resource_group,
+            name,
+        } => {
+            let (_ctx, client, sub) = arm_context(globals).await?;
+            eprintln!("Stopping VM '{name}'…");
+            vm::stop(&client, &sub, &resource_group, &name).await?;
+            println!("Stopped VM '{name}'.");
+            Ok(())
+        }
+        VmCommand::Restart {
+            resource_group,
+            name,
+        } => {
+            let (_ctx, client, sub) = arm_context(globals).await?;
+            eprintln!("Restarting VM '{name}'…");
+            vm::restart(&client, &sub, &resource_group, &name).await?;
+            println!("Restarted VM '{name}'.");
+            Ok(())
+        }
+        VmCommand::Deallocate {
+            resource_group,
+            name,
+        } => {
+            let (_ctx, client, sub) = arm_context(globals).await?;
+            eprintln!("Deallocating VM '{name}'…");
+            vm::deallocate(&client, &sub, &resource_group, &name).await?;
+            println!("Deallocated VM '{name}'.");
+            Ok(())
+        }
+        VmCommand::ListSizes { location } => {
+            let (ctx, client, sub) = arm_context(globals).await?;
+            let value = vm::list_sizes(&client, &sub, &location).await?;
+            emit(
+                &ctx,
+                value,
+                Some(&vec![
+                    ("Name", "name"),
+                    ("vCPUs", "vCPUs"),
+                    ("MemoryGB", "memoryGB"),
+                ]),
+            )
+        }
     }
 }

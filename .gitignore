@@ -10,3 +10,7 @@
 
 # Editor / back-up cruft
 **/*.rs.bk
+
+# Local working docs (roadmap / scratch) — not shipped.
+FEATURES.md
+draft-tasks.txt

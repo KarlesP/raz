@@ -6,7 +6,7 @@ resolver = "2"
 members = ["crates/raz-core", "crates/raz", "crates/raz-tui"]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 license = "MIT"
 rust-version = "1.80"
@@ -23,6 +23,8 @@ thiserror = "1"
 clap = { version = "4", features = ["derive", "env"] }
 comfy-table = "7"
 dirs = "5"
+open = "5"
+uuid = { version = "1", features = ["v4"] }
 
 # TUI stack
 ratatui = "0.29"

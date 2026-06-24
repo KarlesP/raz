@@ -4,11 +4,12 @@
 use clap::Subcommand;
 use serde_json::{json, Value};
 
+use raz_core::auth::{device_code, now_unix};
 use raz_core::config::Profile;
 use raz_core::context::Context;
 use raz_core::error::{usage, Result};
 use raz_core::output::TableSpec;
-use raz_core::GlobalArgs;
+use raz_core::{GlobalArgs, RazError};
 
 use super::emit;
 
@@ -26,6 +27,8 @@ pub enum AccountCommand {
     },
     /// List the distinct tenants the cached subscriptions belong to.
     ListTenants,
+    /// Print a bearer token (and expiry) for the active subscription's tenant, for scripting/CI.
+    GetAccessToken,
 }
 
 fn subscription_table() -> TableSpec {
@@ -65,6 +68,36 @@ pub async fn run(command: AccountCommand, globals: GlobalArgs) -> Result<()> {
             emit(&ctx, value, Some(&vec![("TenantId", "tenantId")]))
         }
         AccountCommand::Set { subscription } => set_default(subscription),
+        AccountCommand::GetAccessToken => {
+            let ctx = Context::load(globals)?;
+            let (sub_id, tenant) = ctx
+                .active_subscription()
+                .map(|s| (s.id.clone(), s.tenant_id.clone()))
+                .ok_or(RazError::NotLoggedIn)?;
+            let cached = ctx.profile.token.as_ref().ok_or(RazError::NotLoggedIn)?;
+            // Prefer a fresh tenant-scoped token from the refresh token; else the cached one.
+            let (access_token, expires_on) = match &cached.refresh_token {
+                Some(refresh) => {
+                    let tok = device_code::exchange_refresh_token(
+                        &ctx.http,
+                        &tenant,
+                        refresh,
+                        device_code::DEFAULT_SCOPE,
+                    )
+                    .await?;
+                    (tok.access_token, now_unix() + tok.expires_in)
+                }
+                None => (cached.access_token.clone(), cached.expires_on),
+            };
+            let value = json!({
+                "tokenType": "Bearer",
+                "accessToken": access_token,
+                "expiresOn": expires_on,
+                "subscription": sub_id,
+                "tenant": tenant,
+            });
+            emit(&ctx, value, None)
+        }
     }
 }
 

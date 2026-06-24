@@ -14,3 +14,5 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 comfy-table = { workspace = true }
 dirs = { workspace = true }
+open = { workspace = true }
+uuid = { workspace = true }
