@@ -1106,7 +1106,7 @@ dependencies = [
 
 [[package]]
 name = "raz"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "clap",
  "raz-core",
@@ -1117,7 +1117,7 @@ dependencies = [
 
 [[package]]
 name = "raz-core"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "comfy-table",
  "dirs",
@@ -1132,7 +1132,7 @@ dependencies = [
 
 [[package]]
 name = "raz-tui"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "ratatui",
  "raz-core",
