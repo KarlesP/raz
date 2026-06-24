@@ -43,22 +43,14 @@ pub async fn list_definitions(
         path.push_str(&format!("?{}", crate::odata::odata_eq("roleName", n)));
     }
     let body = client.get(&path, API_VERSION).await?;
-    let items = body
-        .get("value")
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default()
-        .into_iter()
-        .map(|d| {
-            json!({
-                "name": d.get("name").and_then(Value::as_str).unwrap_or(""),
-                "type": d.get("type").and_then(Value::as_str).unwrap_or(""),
-                "roleName": d.pointer("/properties/roleName").and_then(Value::as_str).unwrap_or(""),
-                "id": d.get("id").and_then(Value::as_str).unwrap_or(""),
-            })
+    Ok(super::map_list(&body, |d| {
+        json!({
+            "name": d.get("name").and_then(Value::as_str).unwrap_or(""),
+            "type": d.get("type").and_then(Value::as_str).unwrap_or(""),
+            "roleName": d.pointer("/properties/roleName").and_then(Value::as_str).unwrap_or(""),
+            "id": d.get("id").and_then(Value::as_str).unwrap_or(""),
         })
-        .collect();
-    Ok(Value::Array(items))
+    }))
 }
 
 /// Resolve a role given by name (e.g. "Contributor") or GUID into a full roleDefinition id.
@@ -97,15 +89,7 @@ pub async fn list_assignments(
         path.push_str(&format!("?{}", crate::odata::odata_eq("principalId", a)));
     }
     let body = client.get(&path, API_VERSION).await?;
-    let items = body
-        .get("value")
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default()
-        .into_iter()
-        .map(flatten_assignment)
-        .collect();
-    Ok(Value::Array(items))
+    Ok(super::map_list(&body, flatten_assignment))
 }
 
 /// `role assignment create` — assign `role` (name or GUID) to `principal_id` at `scope`.
@@ -131,7 +115,7 @@ pub async fn create_assignment(
     let assignment = client
         .put(&path, API_VERSION, &json!({ "properties": props }))
         .await?;
-    Ok(flatten_assignment(assignment))
+    Ok(flatten_assignment(&assignment))
 }
 
 /// `role assignment delete` — remove the assignment of `role` to `principal_id` at `scope`.
@@ -170,7 +154,7 @@ pub async fn delete_assignment(
 }
 
 /// Lift the useful `properties` fields up to the top level for table/JSON output.
-fn flatten_assignment(a: Value) -> Value {
+fn flatten_assignment(a: &Value) -> Value {
     json!({
         "name": a.get("name").and_then(Value::as_str).unwrap_or(""),
         "principalId": a.pointer("/properties/principalId").and_then(Value::as_str).unwrap_or(""),

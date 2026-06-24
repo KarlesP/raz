@@ -25,7 +25,8 @@ fn vault_path(subscription: &str, resource_group: &str, name: &str) -> String {
     )
 }
 
-fn flatten(mut v: Value) -> Value {
+fn flatten(v: &Value) -> Value {
+    let mut v = v.clone();
     super::enrich_resource(&mut v); // derives resourceGroup from the id
     json!({
         "name": v.get("name").and_then(Value::as_str).unwrap_or(""),
@@ -39,12 +40,7 @@ fn flatten(mut v: Value) -> Value {
 pub async fn list(client: &ArmClient, subscription: &str) -> Result<Value> {
     let path = format!("/subscriptions/{subscription}/providers/{PROVIDER}");
     let body = client.get(&path, API_VERSION).await?;
-    let items = body
-        .get("value")
-        .and_then(Value::as_array)
-        .map(|v| v.iter().cloned().map(flatten).collect())
-        .unwrap_or_default();
-    Ok(Value::Array(items))
+    Ok(super::map_list(&body, flatten))
 }
 
 /// `raz keyvault show`.
@@ -57,7 +53,7 @@ pub async fn show(
     let body = client
         .get(&vault_path(subscription, resource_group, name), API_VERSION)
         .await?;
-    Ok(flatten(body))
+    Ok(flatten(&body))
 }
 
 /// `raz keyvault create` — RBAC-authorization vault (no access policies). `tenant_id` is the
@@ -86,5 +82,5 @@ pub async fn create(
     });
     client.put(&path, API_VERSION, &body).await?;
     let done = client.wait_provisioning(&path, API_VERSION).await?;
-    Ok(flatten(done))
+    Ok(flatten(&done))
 }
