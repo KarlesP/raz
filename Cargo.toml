@@ -27,6 +27,7 @@ dirs = "5"
 open = "5"
 uuid = { version = "1", features = ["v4"] }
 base64 = "0.22"
+jmespath = "0.3"
 
 # TUI stack
 ratatui = "0.29"

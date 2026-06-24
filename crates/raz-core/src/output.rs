@@ -99,23 +99,18 @@ fn tsv_scalar(value: &Value) -> String {
     }
 }
 
-/// Apply a minimal dotted-path `--query` (a small subset of az's JMESPath). Supports
-/// object keys and numeric array indices, e.g. `subscriptions.0.name`. Unknown paths yield
-/// JSON null. This is deliberately not full JMESPath — that is out of scope.
+/// Apply a JMESPath `--query` to the result, like az. Supports the full JMESPath grammar
+/// (projections, filters, functions, pipes). An empty query returns the value unchanged; an
+/// invalid expression or no match yields JSON null.
 pub fn apply_query(value: &Value, query: &str) -> Value {
-    let mut cur = value;
-    for segment in query.split('.').filter(|s| !s.is_empty()) {
-        let next = if let Ok(idx) = segment.parse::<usize>() {
-            cur.get(idx)
-        } else {
-            cur.get(segment)
-        };
-        match next {
-            Some(v) => cur = v,
-            None => return Value::Null,
-        }
+    if query.trim().is_empty() {
+        return value.clone();
     }
-    cur.clone()
+    let result = jmespath::compile(query).and_then(|expr| expr.search(value));
+    match result {
+        Ok(var) => serde_json::to_value(&*var).unwrap_or(Value::Null),
+        Err(_) => Value::Null,
+    }
 }
 
 #[cfg(test)]
@@ -171,10 +166,11 @@ mod tests {
     }
 
     #[test]
-    fn query_traverses_objects_and_indices() {
+    fn query_runs_jmespath() {
         let v = json!({"subs": [{"name": "Dev"}, {"name": "Prod"}]});
-        assert_eq!(apply_query(&v, "subs.1.name"), json!("Prod"));
-        assert_eq!(apply_query(&v, "subs.5"), Value::Null);
+        assert_eq!(apply_query(&v, "subs[1].name"), json!("Prod"));
+        assert_eq!(apply_query(&v, "subs[].name"), json!(["Dev", "Prod"]));
+        assert_eq!(apply_query(&v, "subs[5]"), Value::Null);
         assert_eq!(apply_query(&v, ""), v);
     }
 }
