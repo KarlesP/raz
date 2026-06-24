@@ -139,6 +139,11 @@ enum TopCommand {
         #[command(subcommand)]
         command: commands::keyvault::KeyvaultCommand,
     },
+    /// Network resources — NSGs, public IPs, NICs.
+    Network {
+        #[command(subcommand)]
+        command: commands::network::NetworkCommand,
+    },
 }
 
 #[tokio::main]
@@ -183,5 +188,6 @@ async fn run(cli: Cli) -> Result<(), RazError> {
         TopCommand::Deployment { command } => commands::deployment::run(command, globals).await,
         TopCommand::Storage { command } => commands::storage::run(command, globals).await,
         TopCommand::Keyvault { command } => commands::keyvault::run(command, globals).await,
+        TopCommand::Network { command } => commands::network::run(command, globals).await,
     }
 }
