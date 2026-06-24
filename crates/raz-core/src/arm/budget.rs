@@ -62,6 +62,37 @@ pub async fn create(
     Ok(flatten(&resp))
 }
 
+/// `raz budget update` — change amount / time-grain / end-date on an existing budget
+/// (read-modify-write; unset fields keep their current value).
+pub async fn update(
+    client: &ArmClient,
+    scope: &str,
+    name: &str,
+    amount: Option<f64>,
+    time_grain: Option<&str>,
+    end: Option<&str>,
+) -> Result<Value> {
+    let path = budget_path(scope, name);
+    let existing = client.get(&path, API_VERSION).await?;
+    let mut props = existing
+        .get("properties")
+        .cloned()
+        .unwrap_or_else(|| json!({}));
+    if let Some(a) = amount {
+        props["amount"] = json!(a);
+    }
+    if let Some(tg) = time_grain {
+        props["timeGrain"] = json!(tg);
+    }
+    if let Some(e) = end {
+        props["timePeriod"]["endDate"] = json!(e);
+    }
+    let resp = client
+        .put(&path, API_VERSION, &json!({ "properties": props }))
+        .await?;
+    Ok(flatten(&resp))
+}
+
 /// `raz budget list`.
 pub async fn list(client: &ArmClient, scope: &str) -> Result<Value> {
     let path = format!("{scope}/providers/Microsoft.Consumption/budgets");

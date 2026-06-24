@@ -29,6 +29,19 @@ pub enum BudgetCommand {
         #[arg(long, short = 'g')]
         resource_group: Option<String>,
     },
+    /// Update an existing budget's amount / time-grain / end-date.
+    Update {
+        #[arg(long, short = 'n')]
+        name: String,
+        #[arg(long)]
+        amount: Option<f64>,
+        #[arg(long)]
+        time_grain: Option<String>,
+        #[arg(long)]
+        end_date: Option<String>,
+        #[arg(long, short = 'g')]
+        resource_group: Option<String>,
+    },
     /// List budgets at a scope.
     List {
         #[arg(long, short = 'g')]
@@ -62,6 +75,26 @@ pub async fn run(command: BudgetCommand, globals: GlobalArgs) -> Result<()> {
                 amount,
                 &time_grain,
                 &start_date,
+                end_date.as_deref(),
+            )
+            .await?;
+            emit(&ctx, value, Some(&budget::table_spec()))
+        }
+        BudgetCommand::Update {
+            name,
+            amount,
+            time_grain,
+            end_date,
+            resource_group,
+        } => {
+            let (ctx, client, sub) = arm_context(globals).await?;
+            let scope = role::scope(&sub, resource_group.as_deref());
+            let value = budget::update(
+                &client,
+                &scope,
+                &name,
+                amount,
+                time_grain.as_deref(),
                 end_date.as_deref(),
             )
             .await?;
