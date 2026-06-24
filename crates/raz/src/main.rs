@@ -150,6 +150,11 @@ enum TopCommand {
         #[command(subcommand)]
         command: commands::aks::AksCommand,
     },
+    /// Azure Monitor — metrics and activity log.
+    Monitor {
+        #[command(subcommand)]
+        command: commands::monitor::MonitorCommand,
+    },
     /// Print a shell completion script (bash, zsh, fish, powershell, elvish).
     Completion {
         #[arg(value_enum)]
@@ -201,6 +206,7 @@ async fn run(cli: Cli) -> Result<(), RazError> {
         TopCommand::Keyvault { command } => commands::keyvault::run(command, globals).await,
         TopCommand::Network { command } => commands::network::run(command, globals).await,
         TopCommand::Aks { command } => commands::aks::run(command, globals).await,
+        TopCommand::Monitor { command } => commands::monitor::run(command, globals).await,
         TopCommand::Completion { shell } => commands::completion::run(shell),
     }
 }
