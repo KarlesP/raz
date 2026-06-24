@@ -40,7 +40,7 @@ pub async fn list_definitions(
 ) -> Result<Value> {
     let mut path = format!("{scope}/providers/Microsoft.Authorization/roleDefinitions");
     if let Some(n) = name {
-        path.push_str(&format!("?$filter=roleName%20eq%20%27{n}%27"));
+        path.push_str(&format!("?{}", crate::odata::odata_eq("roleName", n)));
     }
     let body = client.get(&path, API_VERSION).await?;
     let items = body
@@ -74,7 +74,8 @@ async fn resolve_role_definition_id(
         ));
     }
     let path = format!(
-        "/subscriptions/{subscription}/providers/Microsoft.Authorization/roleDefinitions?$filter=roleName%20eq%20%27{role}%27"
+        "/subscriptions/{subscription}/providers/Microsoft.Authorization/roleDefinitions?{}",
+        crate::odata::odata_eq("roleName", role)
     );
     client
         .get(&path, API_VERSION)
@@ -93,7 +94,7 @@ pub async fn list_assignments(
 ) -> Result<Value> {
     let mut path = format!("{scope}/providers/Microsoft.Authorization/roleAssignments");
     if let Some(a) = assignee {
-        path.push_str(&format!("?$filter=principalId%20eq%20%27{a}%27"));
+        path.push_str(&format!("?{}", crate::odata::odata_eq("principalId", a)));
     }
     let body = client.get(&path, API_VERSION).await?;
     let items = body
@@ -143,7 +144,8 @@ pub async fn delete_assignment(
 ) -> Result<()> {
     let role_definition_id = resolve_role_definition_id(client, subscription, role).await?;
     let path = format!(
-        "{scope}/providers/Microsoft.Authorization/roleAssignments?$filter=principalId%20eq%20%27{principal_id}%27"
+        "{scope}/providers/Microsoft.Authorization/roleAssignments?{}",
+        crate::odata::odata_eq("principalId", principal_id)
     );
     let body = client.get(&path, API_VERSION).await?;
     let id = body

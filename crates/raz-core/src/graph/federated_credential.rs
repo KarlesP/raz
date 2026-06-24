@@ -19,8 +19,10 @@ pub fn table_spec() -> TableSpec {
 /// Resolve an app's directory **object id** from either its appId (client id) or object id.
 /// az's `--id` accepts both; Graph addresses applications by object id.
 async fn resolve_object_id(client: &GraphClient, id: &str) -> Result<String> {
-    // $filter must be URL-encoded (space -> %20, quote -> %27); an appId is a plain GUID.
-    let path = format!("/applications?$filter=appId%20eq%20%27{id}%27&$select=id");
+    let path = format!(
+        "/applications?{}&$select=id",
+        crate::odata::odata_eq("appId", id)
+    );
     if let Ok(body) = client.get(&path).await {
         if let Some(obj) = body
             .get("value")
