@@ -144,6 +144,11 @@ enum TopCommand {
         #[command(subcommand)]
         command: commands::network::NetworkCommand,
     },
+    /// Manage AKS clusters and fetch kubeconfig.
+    Aks {
+        #[command(subcommand)]
+        command: commands::aks::AksCommand,
+    },
 }
 
 #[tokio::main]
@@ -189,5 +194,6 @@ async fn run(cli: Cli) -> Result<(), RazError> {
         TopCommand::Storage { command } => commands::storage::run(command, globals).await,
         TopCommand::Keyvault { command } => commands::keyvault::run(command, globals).await,
         TopCommand::Network { command } => commands::network::run(command, globals).await,
+        TopCommand::Aks { command } => commands::aks::run(command, globals).await,
     }
 }

@@ -3,6 +3,7 @@
 
 pub mod account;
 pub mod ad;
+pub mod aks;
 pub mod budget;
 pub mod deployment;
 pub mod group;
