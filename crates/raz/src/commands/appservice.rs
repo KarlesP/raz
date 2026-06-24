@@ -25,8 +25,8 @@ pub enum PlanCommand {
         resource_group: String,
         #[arg(long, short = 'n')]
         name: String,
-        #[arg(long, short = 'l', default_value = "westeurope")]
-        location: String,
+        #[arg(long, short = 'l')]
+        location: Option<String>,
         /// SKU, e.g. B1, S1, P1v3, F1.
         #[arg(long, default_value = "B1")]
         sku: String,
@@ -48,6 +48,7 @@ pub async fn run(command: AppserviceCommand, globals: GlobalArgs) -> Result<()> 
             },
     } = command;
     let (ctx, client, sub) = arm_context(globals).await?;
+    let location = ctx.resolve_location(location);
     eprintln!("Creating App Service plan '{name}' in {location}…");
     let value = appservice::create_plan(
         &client,

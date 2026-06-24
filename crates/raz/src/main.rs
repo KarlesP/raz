@@ -33,9 +33,9 @@ struct GlobalOpts {
     #[arg(long, short = 's', global = true)]
     subscription: Option<String>,
 
-    /// Output format.
-    #[arg(long, short = 'o', global = true, default_value = "json")]
-    output: String,
+    /// Output format. Defaults to the configured default (`raz configure`), else json.
+    #[arg(long, short = 'o', global = true)]
+    output: Option<String>,
 
     /// JMESPath query applied to the JSON result (like az `--query`).
     #[arg(long, global = true)]
@@ -43,10 +43,15 @@ struct GlobalOpts {
 }
 
 impl GlobalOpts {
-    fn to_core(&self) -> Result<GlobalArgs, RazError> {
+    fn to_core(&self, defaults: &raz_core::config::Defaults) -> Result<GlobalArgs, RazError> {
+        // Output precedence: explicit -o, then the configured default, then json.
+        let output = match self.output.clone().or_else(|| defaults.output.clone()) {
+            Some(s) => s.parse::<OutputFormat>()?,
+            None => OutputFormat::Json,
+        };
         Ok(GlobalArgs {
             subscription: self.subscription.clone(),
-            output: self.output.parse::<OutputFormat>()?,
+            output,
             query: self.query.clone(),
         })
     }
@@ -170,6 +175,8 @@ enum TopCommand {
         #[arg(value_enum)]
         shell: Shell,
     },
+    /// View or set persisted defaults (location / output) in `~/.raz`.
+    Configure(commands::configure::ConfigureArgs),
 }
 
 #[tokio::main]
@@ -193,7 +200,8 @@ async fn main() {
 }
 
 async fn run(cli: Cli) -> Result<(), RazError> {
-    let globals = cli.globals.to_core()?;
+    let defaults = raz_core::config::Profile::load()?.defaults;
+    let globals = cli.globals.to_core(&defaults)?;
     match cli.command {
         TopCommand::Login(args) => commands::login::run(args, &globals).await,
         TopCommand::Logout => commands::logout::run().await,
@@ -220,5 +228,6 @@ async fn run(cli: Cli) -> Result<(), RazError> {
         TopCommand::Webapp { command } => commands::webapp::run(command, globals).await,
         TopCommand::Appservice { command } => commands::appservice::run(command, globals).await,
         TopCommand::Completion { shell } => commands::completion::run(shell),
+        TopCommand::Configure(args) => commands::configure::run(args, globals),
     }
 }

@@ -39,8 +39,8 @@ pub enum AccountCommand {
         resource_group: String,
         #[arg(long, short = 'n')]
         name: String,
-        #[arg(long, short = 'l', default_value = "westeurope")]
-        location: String,
+        #[arg(long, short = 'l')]
+        location: Option<String>,
         #[arg(long, default_value = "Standard_LRS")]
         sku: String,
         #[arg(long, default_value = "StorageV2")]
@@ -98,6 +98,7 @@ async fn account(command: AccountCommand, globals: GlobalArgs) -> Result<()> {
             kind,
         } => {
             let (ctx, client, sub) = arm_context(globals).await?;
+            let location = ctx.resolve_location(location);
             eprintln!("Creating storage account '{name}' in {location}…");
             let value = storage::create_account(
                 &client,

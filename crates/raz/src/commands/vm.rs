@@ -2,7 +2,6 @@
 
 use clap::Subcommand;
 
-use raz_core::arm::client::DEFAULT_LOCATION;
 use raz_core::arm::vm::{self, VmCreate, DEFAULT_VM_SIZE};
 use raz_core::error::Result;
 use raz_core::GlobalArgs;
@@ -28,8 +27,8 @@ pub enum VmCommand {
         #[arg(long, short = 'n')]
         name: String,
         /// Azure region.
-        #[arg(long, short = 'l', default_value = DEFAULT_LOCATION)]
-        location: String,
+        #[arg(long, short = 'l')]
+        location: Option<String>,
         /// VM size (SKU).
         #[arg(long, default_value = DEFAULT_VM_SIZE)]
         size: String,
@@ -93,8 +92,8 @@ pub enum VmCommand {
     },
     /// List the VM sizes available in a location.
     ListSizes {
-        #[arg(long, short = 'l', default_value = DEFAULT_LOCATION)]
-        location: String,
+        #[arg(long, short = 'l')]
+        location: Option<String>,
     },
 }
 
@@ -123,6 +122,7 @@ pub async fn run(command: VmCommand, globals: GlobalArgs) -> Result<()> {
             admin_password,
         } => {
             let (ctx, client, sub) = arm_context(globals).await?;
+            let location = ctx.resolve_location(location);
             super::print_caf_recommendation("vm", &name, &location);
             eprintln!("Creating VM '{name}' in {location} (this can take a few minutes)…");
             let value = vm::create(
@@ -212,6 +212,7 @@ pub async fn run(command: VmCommand, globals: GlobalArgs) -> Result<()> {
         }
         VmCommand::ListSizes { location } => {
             let (ctx, client, sub) = arm_context(globals).await?;
+            let location = ctx.resolve_location(location);
             let value = vm::list_sizes(&client, &sub, &location).await?;
             emit(
                 &ctx,

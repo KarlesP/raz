@@ -36,6 +36,14 @@ impl Context {
         })
     }
 
+    /// Resolve a region: the explicit `--location` if given, else the configured default
+    /// (`raz configure`), else the built-in [`crate::arm::client::DEFAULT_LOCATION`].
+    pub fn resolve_location(&self, explicit: Option<String>) -> String {
+        explicit
+            .or_else(|| self.profile.defaults.location.clone())
+            .unwrap_or_else(|| crate::arm::client::DEFAULT_LOCATION.to_string())
+    }
+
     /// The subscription this invocation targets: the `--subscription` match (by id or name)
     /// else the profile default.
     pub fn active_subscription(&self) -> Option<&crate::config::Subscription> {
