@@ -75,12 +75,5 @@ impl GraphClient {
 }
 
 fn map_status(status: u16, path: &str, body: String) -> RazError {
-    match status {
-        401 => RazError::NotLoggedIn,
-        403 => RazError::Auth(format!(
-            "forbidden (need rights on the app registration): {body}"
-        )),
-        404 => RazError::NotFound(path.to_string()),
-        _ => RazError::Http(format!("Graph {status}: {body}")),
-    }
+    crate::error::map_http_status("Graph", status, path, body)
 }

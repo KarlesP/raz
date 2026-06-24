@@ -104,6 +104,46 @@ enum TopCommand {
         #[command(subcommand)]
         command: commands::policy::PolicyCommand,
     },
+    /// Manage resource tags.
+    Tag {
+        #[command(subcommand)]
+        command: commands::tag::TagCommand,
+    },
+    /// Manage resource locks (CanNotDelete / ReadOnly).
+    Lock {
+        #[command(subcommand)]
+        command: commands::lock::LockCommand,
+    },
+    /// Create a subscription (alias API) / check its state.
+    Subscription {
+        #[command(subcommand)]
+        command: commands::subscription::SubscriptionCommand,
+    },
+    /// Manage cost-management budgets.
+    Budget {
+        #[command(subcommand)]
+        command: commands::budget::BudgetCommand,
+    },
+    /// Deploy ARM/Bicep templates (create / what-if).
+    Deployment {
+        #[command(subcommand)]
+        command: commands::deployment::DeploymentCommand,
+    },
+    /// Manage storage accounts and blob containers.
+    Storage {
+        #[command(subcommand)]
+        command: commands::storage::StorageCommand,
+    },
+    /// Manage key vaults and secrets.
+    Keyvault {
+        #[command(subcommand)]
+        command: commands::keyvault::KeyvaultCommand,
+    },
+    /// Network resources — NSGs, public IPs, NICs.
+    Network {
+        #[command(subcommand)]
+        command: commands::network::NetworkCommand,
+    },
 }
 
 #[tokio::main]
@@ -141,5 +181,13 @@ async fn run(cli: Cli) -> Result<(), RazError> {
         TopCommand::Rest(args) => commands::rest::run(args, globals).await,
         TopCommand::Suggest { command } => commands::suggest::run(command, globals).await,
         TopCommand::Policy { command } => commands::policy::run(command, globals).await,
+        TopCommand::Tag { command } => commands::tag::run(command, globals).await,
+        TopCommand::Lock { command } => commands::lock::run(command, globals).await,
+        TopCommand::Subscription { command } => commands::subscription::run(command, globals).await,
+        TopCommand::Budget { command } => commands::budget::run(command, globals).await,
+        TopCommand::Deployment { command } => commands::deployment::run(command, globals).await,
+        TopCommand::Storage { command } => commands::storage::run(command, globals).await,
+        TopCommand::Keyvault { command } => commands::keyvault::run(command, globals).await,
+        TopCommand::Network { command } => commands::network::run(command, globals).await,
     }
 }

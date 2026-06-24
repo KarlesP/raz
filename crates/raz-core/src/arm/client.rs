@@ -26,12 +26,7 @@ const POLL_MAX_ATTEMPTS: u32 = 240; // 240 * 5s = 20 min ceiling
 
 /// Map an ARM HTTP status onto a [`RazError`], preserving az-compatible exit codes.
 fn map_status(status: u16, path: &str, body: String) -> RazError {
-    match status {
-        401 => RazError::NotLoggedIn,
-        403 => RazError::Auth(format!("forbidden: {body}")),
-        404 => RazError::NotFound(path.to_string()),
-        _ => RazError::Http(format!("ARM {status}: {body}")),
-    }
+    crate::error::map_http_status("ARM", status, path, body)
 }
 
 /// API version used for subscription/tenant discovery during login.
@@ -267,6 +262,70 @@ impl ArmClient {
                 }
                 _ => tokio::time::sleep(POLL_INTERVAL).await,
             }
+        }
+        Err(RazError::Http("timed out waiting for operation".into()))
+    }
+
+    /// POST a JSON body and return the operation **result**. A `200` carries the result inline;
+    /// a `202` points at a `Location` URL we poll (GET) until it stops returning `202`, then the
+    /// final body is the result. Used by what-if, where the changes live in that result body
+    /// (unlike [`ArmClient::post_action`], which discards it).
+    pub async fn post_and_wait_result(
+        &self,
+        path: &str,
+        api_version: &str,
+        body: &Value,
+    ) -> Result<Value> {
+        let url = format!("{ARM_ENDPOINT}{path}?api-version={api_version}");
+        let resp = self
+            .http
+            .post(&url)
+            .bearer_auth(&self.token)
+            .json(body)
+            .send()
+            .await?;
+        let status = resp.status();
+        if status.as_u16() != 202 {
+            if !status.is_success() {
+                let text = resp.text().await.unwrap_or_default();
+                return Err(map_status(status.as_u16(), path, text));
+            }
+            let text = resp.text().await.unwrap_or_default();
+            return Ok(serde_json::from_str(&text).unwrap_or(Value::Null));
+        }
+
+        // 202: poll the Location URL until it returns the final (non-202) result.
+        let location = resp
+            .headers()
+            .get("location")
+            .or_else(|| resp.headers().get("azure-asyncoperation"))
+            .and_then(|h| h.to_str().ok())
+            .map(str::to_string)
+            .ok_or_else(|| RazError::Http("async operation missing Location header".into()))?;
+
+        for _ in 0..POLL_MAX_ATTEMPTS {
+            let poll = self
+                .http
+                .get(&location)
+                .bearer_auth(&self.token)
+                .send()
+                .await?;
+            if poll.status().as_u16() == 202 {
+                tokio::time::sleep(POLL_INTERVAL).await;
+                continue;
+            }
+            let ok = poll.status().is_success();
+            let text = poll.text().await.unwrap_or_default();
+            let value: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
+            if !ok {
+                return Err(RazError::Http(format!("operation failed: {text}")));
+            }
+            if let Some(s) = value.get("status").and_then(Value::as_str) {
+                if s == "Failed" || s == "Canceled" {
+                    return Err(RazError::Http(format!("operation {s}")));
+                }
+            }
+            return Ok(value);
         }
         Err(RazError::Http("timed out waiting for operation".into()))
     }

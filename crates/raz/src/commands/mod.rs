@@ -3,14 +3,22 @@
 
 pub mod account;
 pub mod ad;
+pub mod budget;
+pub mod deployment;
 pub mod group;
+pub mod keyvault;
+pub mod lock;
 pub mod login;
 pub mod logout;
+pub mod network;
 pub mod policy;
 pub mod resource;
 pub mod rest;
 pub mod role;
+pub mod storage;
+pub mod subscription;
 pub mod suggest;
+pub mod tag;
 pub mod vm;
 pub mod vnet;
 
