@@ -77,6 +77,11 @@ enum TopCommand {
         #[command(subcommand)]
         command: commands::role::RoleCommand,
     },
+    /// Generic CRUD over any resource type/id.
+    Resource {
+        #[command(subcommand)]
+        command: commands::resource::ResourceCommand,
+    },
     /// Manage virtual networks.
     Vnet {
         #[command(subcommand)]
@@ -120,6 +125,7 @@ async fn run(cli: Cli) -> Result<(), RazError> {
         TopCommand::Ad { command } => commands::ad::run(command, globals).await,
         TopCommand::Group { command } => commands::group::run(command, globals).await,
         TopCommand::Role { command } => commands::role::run(command, globals).await,
+        TopCommand::Resource { command } => commands::resource::run(command, globals).await,
         TopCommand::Vnet { command } => commands::vnet::run(command, globals).await,
         TopCommand::Vm { command } => commands::vm::run(command, globals).await,
         TopCommand::Rest(args) => commands::rest::run(args, globals).await,
