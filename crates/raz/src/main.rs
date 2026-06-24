@@ -114,6 +114,16 @@ enum TopCommand {
         #[command(subcommand)]
         command: commands::lock::LockCommand,
     },
+    /// Create a subscription (alias API) / check its state.
+    Subscription {
+        #[command(subcommand)]
+        command: commands::subscription::SubscriptionCommand,
+    },
+    /// Manage cost-management budgets.
+    Budget {
+        #[command(subcommand)]
+        command: commands::budget::BudgetCommand,
+    },
 }
 
 #[tokio::main]
@@ -153,5 +163,7 @@ async fn run(cli: Cli) -> Result<(), RazError> {
         TopCommand::Policy { command } => commands::policy::run(command, globals).await,
         TopCommand::Tag { command } => commands::tag::run(command, globals).await,
         TopCommand::Lock { command } => commands::lock::run(command, globals).await,
+        TopCommand::Subscription { command } => commands::subscription::run(command, globals).await,
+        TopCommand::Budget { command } => commands::budget::run(command, globals).await,
     }
 }
