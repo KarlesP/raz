@@ -9,6 +9,7 @@ pub mod lock;
 pub mod policy;
 pub mod resource;
 pub mod role;
+pub mod storage;
 pub mod subscription;
 pub mod tag;
 pub mod vm;
