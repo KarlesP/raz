@@ -342,3 +342,45 @@ pub async fn deallocate(
 ) -> Result<()> {
     power_action(client, subscription, rg, name, "deallocate").await
 }
+
+/// `raz vm list-sizes` — the VM sizes offered in `location`, from the Compute resource-SKUs API
+/// (the same source the create pre-flight uses). Projects name + vCPUs + memory.
+pub async fn list_sizes(client: &ArmClient, subscription: &str, location: &str) -> Result<Value> {
+    let path = format!(
+        "/subscriptions/{subscription}/providers/Microsoft.Compute/skus?$filter=location%20eq%20%27{location}%27"
+    );
+    let body = client.get(&path, SKUS_API).await?;
+    let items = body
+        .get("value")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+
+    let mut sizes = Vec::new();
+    for item in &items {
+        if item.get("resourceType").and_then(Value::as_str) != Some("virtualMachines") {
+            continue;
+        }
+        let Some(name) = item.get("name").and_then(Value::as_str) else {
+            continue;
+        };
+        let cap = |key: &str| -> String {
+            item.get("capabilities")
+                .and_then(Value::as_array)
+                .and_then(|caps| {
+                    caps.iter()
+                        .find(|c| c.get("name").and_then(Value::as_str) == Some(key))
+                })
+                .and_then(|c| c.get("value").and_then(Value::as_str))
+                .unwrap_or("")
+                .to_string()
+        };
+        sizes.push(json!({
+            "name": name,
+            "vCPUs": cap("vCPUs"),
+            "memoryGB": cap("MemoryGB"),
+            "location": location,
+        }));
+    }
+    Ok(Value::Array(sizes))
+}
