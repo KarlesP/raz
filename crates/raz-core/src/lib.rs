@@ -12,6 +12,7 @@ pub mod context;
 pub mod error;
 pub mod graph;
 pub mod output;
+pub mod suggest;
 
 pub use context::{Context, GlobalArgs};
 pub use error::{RazError, Result};
