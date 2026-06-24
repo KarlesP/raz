@@ -4,6 +4,7 @@
 pub mod account;
 pub mod ad;
 pub mod budget;
+pub mod deployment;
 pub mod group;
 pub mod lock;
 pub mod login;
