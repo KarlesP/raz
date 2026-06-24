@@ -1120,6 +1120,7 @@ dependencies = [
 name = "raz-core"
 version = "0.3.0"
 dependencies = [
+ "base64",
  "comfy-table",
  "dirs",
  "open",

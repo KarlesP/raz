@@ -19,6 +19,18 @@ pub struct LoginArgs {
     #[arg(long, short = 't', env = "AZURE_TENANT_ID")]
     pub tenant: Option<String>,
 
+    /// Log in using managed identity.
+    #[arg(long, short = 'i', help_heading = "Managed Identity")]
+    pub identity: bool,
+
+    /// Object ID of the user-assigned managed identity.
+    #[arg(long, help_heading = "Managed Identity")]
+    pub object_id: Option<String>,
+
+    /// Resource ID of the user-assigned managed identity.
+    #[arg(long, help_heading = "Managed Identity")]
+    pub resource_id: Option<String>,
+
     /// Sign in as a service principal (non-interactive) instead of the device-code flow.
     #[arg(long)]
     pub service_principal: bool,
@@ -45,7 +57,9 @@ pub async fn run(args: LoginArgs, _globals: &GlobalArgs) -> Result<()> {
     let http = new_http_client();
     let mut profile = Profile::load()?;
 
-    let (tenant, token) = if args.service_principal {
+    let (tenant, token) = if args.identity {
+        identity_login(&http, &args).await?
+    } else if args.service_principal {
         service_principal_login(&http, &args).await?
     } else {
         device_code_login(&http, &profile, &args).await?
@@ -109,6 +123,30 @@ async fn device_code_login(
         device_code::open_verification(dc);
     })
     .await?;
+    Ok((tenant, token))
+}
+
+/// Managed-identity sign-in via IMDS. No refresh token; the ARM access token is cached and used
+/// directly. `--client-id` selects a user-assigned identity.
+async fn identity_login(
+    http: &reqwest::Client,
+    args: &LoginArgs,
+) -> Result<(String, TokenResponse)> {
+    use raz_core::auth::managed_identity;
+    println!("Signing in with managed identity…");
+    let token = managed_identity::acquire(
+        http,
+        args.client_id.as_deref(),
+        args.object_id.as_deref(),
+        args.resource_id.as_deref(),
+    )
+    .await?;
+    // Match az: take the tenant from the token's `tid` claim (override with --tenant).
+    let tenant = args
+        .tenant
+        .clone()
+        .or_else(|| managed_identity::tenant_from_token(&token.access_token))
+        .unwrap_or_default();
     Ok((tenant, token))
 }
 
