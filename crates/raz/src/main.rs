@@ -104,6 +104,16 @@ enum TopCommand {
         #[command(subcommand)]
         command: commands::policy::PolicyCommand,
     },
+    /// Manage resource tags.
+    Tag {
+        #[command(subcommand)]
+        command: commands::tag::TagCommand,
+    },
+    /// Manage resource locks (CanNotDelete / ReadOnly).
+    Lock {
+        #[command(subcommand)]
+        command: commands::lock::LockCommand,
+    },
 }
 
 #[tokio::main]
@@ -141,5 +151,7 @@ async fn run(cli: Cli) -> Result<(), RazError> {
         TopCommand::Rest(args) => commands::rest::run(args, globals).await,
         TopCommand::Suggest { command } => commands::suggest::run(command, globals).await,
         TopCommand::Policy { command } => commands::policy::run(command, globals).await,
+        TopCommand::Tag { command } => commands::tag::run(command, globals).await,
+        TopCommand::Lock { command } => commands::lock::run(command, globals).await,
     }
 }
