@@ -124,6 +124,11 @@ enum TopCommand {
         #[command(subcommand)]
         command: commands::budget::BudgetCommand,
     },
+    /// Deploy ARM/Bicep templates (create / what-if).
+    Deployment {
+        #[command(subcommand)]
+        command: commands::deployment::DeploymentCommand,
+    },
 }
 
 #[tokio::main]
@@ -165,5 +170,6 @@ async fn run(cli: Cli) -> Result<(), RazError> {
         TopCommand::Lock { command } => commands::lock::run(command, globals).await,
         TopCommand::Subscription { command } => commands::subscription::run(command, globals).await,
         TopCommand::Budget { command } => commands::budget::run(command, globals).await,
+        TopCommand::Deployment { command } => commands::deployment::run(command, globals).await,
     }
 }

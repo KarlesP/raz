@@ -3,6 +3,7 @@
 
 pub mod budget;
 pub mod client;
+pub mod deployment;
 pub mod group;
 pub mod lock;
 pub mod policy;
