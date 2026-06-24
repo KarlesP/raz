@@ -7,6 +7,7 @@ pub mod aks;
 pub mod appservice;
 pub mod budget;
 pub mod completion;
+pub mod configure;
 pub mod deployment;
 pub mod group;
 pub mod keyvault;

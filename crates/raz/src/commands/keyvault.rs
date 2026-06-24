@@ -27,8 +27,8 @@ pub enum KeyvaultCommand {
         resource_group: String,
         #[arg(long, short = 'n')]
         name: String,
-        #[arg(long, short = 'l', default_value = "westeurope")]
-        location: String,
+        #[arg(long, short = 'l')]
+        location: Option<String>,
         #[arg(long, default_value = "standard")]
         sku: String,
     },
@@ -85,6 +85,7 @@ pub async fn run(command: KeyvaultCommand, globals: GlobalArgs) -> Result<()> {
             sku,
         } => {
             let (ctx, client, sub) = arm_context(globals).await?;
+            let location = ctx.resolve_location(location);
             let tenant = ctx
                 .active_subscription()
                 .map(|s| s.tenant_id.clone())
