@@ -40,6 +40,10 @@ struct GlobalOpts {
     /// JMESPath query applied to the JSON result (like az `--query`).
     #[arg(long, global = true)]
     query: Option<String>,
+
+    /// Don't wait for long-running operations to finish (az `--no-wait`).
+    #[arg(long, global = true)]
+    no_wait: bool,
 }
 
 impl GlobalOpts {
@@ -53,6 +57,7 @@ impl GlobalOpts {
             subscription: self.subscription.clone(),
             output,
             query: self.query.clone(),
+            no_wait: self.no_wait,
         })
     }
 }
@@ -177,6 +182,8 @@ enum TopCommand {
     },
     /// View or set persisted defaults (location / output) in `~/.raz`.
     Configure(commands::configure::ConfigureArgs),
+    /// Wait until a resource reaches a state (created / deleted / exists / custom).
+    Wait(commands::wait::WaitArgs),
 }
 
 #[tokio::main]
@@ -229,5 +236,6 @@ async fn run(cli: Cli) -> Result<(), RazError> {
         TopCommand::Appservice { command } => commands::appservice::run(command, globals).await,
         TopCommand::Completion { shell } => commands::completion::run(shell),
         TopCommand::Configure(args) => commands::configure::run(args, globals),
+        TopCommand::Wait(args) => commands::wait::run(args, globals).await,
     }
 }
