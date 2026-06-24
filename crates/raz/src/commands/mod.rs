@@ -13,6 +13,7 @@ pub mod policy;
 pub mod resource;
 pub mod rest;
 pub mod role;
+pub mod storage;
 pub mod subscription;
 pub mod suggest;
 pub mod tag;

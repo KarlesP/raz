@@ -129,6 +129,11 @@ enum TopCommand {
         #[command(subcommand)]
         command: commands::deployment::DeploymentCommand,
     },
+    /// Manage storage accounts and blob containers.
+    Storage {
+        #[command(subcommand)]
+        command: commands::storage::StorageCommand,
+    },
 }
 
 #[tokio::main]
@@ -171,5 +176,6 @@ async fn run(cli: Cli) -> Result<(), RazError> {
         TopCommand::Subscription { command } => commands::subscription::run(command, globals).await,
         TopCommand::Budget { command } => commands::budget::run(command, globals).await,
         TopCommand::Deployment { command } => commands::deployment::run(command, globals).await,
+        TopCommand::Storage { command } => commands::storage::run(command, globals).await,
     }
 }
