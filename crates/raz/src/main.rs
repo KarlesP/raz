@@ -37,7 +37,7 @@ struct GlobalOpts {
     #[arg(long, short = 'o', global = true, default_value = "json")]
     output: String,
 
-    /// Minimal dotted-path projection of the JSON result (subset of JMESPath).
+    /// JMESPath query applied to the JSON result (like az `--query`).
     #[arg(long, global = true)]
     query: Option<String>,
 }
