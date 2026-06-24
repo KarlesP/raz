@@ -89,6 +89,11 @@ enum TopCommand {
     },
     /// Make an arbitrary authenticated ARM/Graph REST call.
     Rest(commands::rest::RestArgs),
+    /// Scan governance / policy assignments + compliance.
+    Policy {
+        #[command(subcommand)]
+        command: commands::policy::PolicyCommand,
+    },
 }
 
 #[tokio::main]
@@ -123,5 +128,6 @@ async fn run(cli: Cli) -> Result<(), RazError> {
         TopCommand::Vnet { command } => commands::vnet::run(command, globals).await,
         TopCommand::Vm { command } => commands::vm::run(command, globals).await,
         TopCommand::Rest(args) => commands::rest::run(args, globals).await,
+        TopCommand::Policy { command } => commands::policy::run(command, globals).await,
     }
 }
