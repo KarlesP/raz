@@ -24,6 +24,7 @@ clap = { version = "4", features = ["derive", "env"] }
 comfy-table = "7"
 dirs = "5"
 open = "5"
+uuid = { version = "1", features = ["v4"] }
 
 # TUI stack
 ratatui = "0.29"
