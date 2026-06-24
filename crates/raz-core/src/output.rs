@@ -15,8 +15,11 @@ use crate::error::{usage, Result};
 pub enum OutputFormat {
     #[default]
     Json,
+    Yaml,
     Table,
     Tsv,
+    /// Suppress result output entirely (az `--output none`).
+    None,
 }
 
 impl FromStr for OutputFormat {
@@ -24,10 +27,12 @@ impl FromStr for OutputFormat {
     fn from_str(s: &str) -> Result<Self> {
         match s.to_ascii_lowercase().as_str() {
             "json" => Ok(OutputFormat::Json),
+            "yaml" => Ok(OutputFormat::Yaml),
             "table" => Ok(OutputFormat::Table),
             "tsv" => Ok(OutputFormat::Tsv),
+            "none" => Ok(OutputFormat::None),
             other => Err(usage(format!(
-                "unknown output format '{other}' (expected json|table|tsv)"
+                "unknown output format '{other}' (expected json|yaml|table|tsv|none)"
             ))),
         }
     }
@@ -41,6 +46,8 @@ pub type TableSpec = Vec<(&'static str, &'static str)>;
 pub fn render(value: &Value, format: OutputFormat, table: Option<&TableSpec>) -> Result<String> {
     match format {
         OutputFormat::Json => Ok(serde_json::to_string_pretty(value)?),
+        OutputFormat::Yaml => serde_yaml::to_string(value)
+            .map_err(|e| crate::error::RazError::Other(format!("yaml: {e}"))),
         OutputFormat::Table => match table {
             Some(spec) => Ok(render_table(value, spec)),
             None => Ok(serde_json::to_string_pretty(value)?),
@@ -49,6 +56,7 @@ pub fn render(value: &Value, format: OutputFormat, table: Option<&TableSpec>) ->
             Some(spec) => Ok(render_tsv(value, spec)),
             None => Ok(tsv_scalar(value)),
         },
+        OutputFormat::None => Ok(String::new()),
     }
 }
 

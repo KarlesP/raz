@@ -73,6 +73,10 @@ pub(crate) fn parse_tags(pairs: &[String]) -> Result<Vec<(String, String)>> {
 /// Render a command result to stdout honoring the global `--output` and `--query`,
 /// matching how az pipes every result through its output system.
 pub(crate) fn emit(ctx: &Context, value: Value, table: Option<&TableSpec>) -> Result<()> {
+    // `--output none`: suppress result output entirely (az parity).
+    if matches!(ctx.globals.output, raz_core::OutputFormat::None) {
+        return Ok(());
+    }
     let projected = match &ctx.globals.query {
         Some(q) => output::apply_query(&value, q),
         None => value,
