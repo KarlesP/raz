@@ -26,6 +26,7 @@ pub mod suggest;
 pub mod tag;
 pub mod vm;
 pub mod vnet;
+pub mod wait;
 pub mod webapp;
 
 use serde_json::Value;
@@ -95,8 +96,10 @@ pub(crate) fn emit(ctx: &Context, value: Value, table: Option<&TableSpec>) -> Re
 pub(crate) async fn arm_context(
     globals: GlobalArgs,
 ) -> Result<(Context, raz_core::arm::client::ArmClient, String)> {
+    let no_wait = globals.no_wait;
     let ctx = Context::load(globals)?;
     let (subscription, token) = ctx.subscription_and_token().await?;
-    let client = raz_core::arm::client::ArmClient::with_token(ctx.http.clone(), token);
+    let client =
+        raz_core::arm::client::ArmClient::with_token(ctx.http.clone(), token).no_wait(no_wait);
     Ok((ctx, client, subscription))
 }

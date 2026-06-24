@@ -19,6 +19,7 @@ pub mod subscription;
 pub mod tag;
 pub mod vm;
 pub mod vnet;
+pub mod wait;
 
 use crate::output::TableSpec;
 use serde_json::Value;

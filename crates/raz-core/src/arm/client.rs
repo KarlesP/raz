@@ -92,13 +92,26 @@ pub async fn discover_all(
 pub struct ArmClient {
     http: reqwest::Client,
     token: String,
+    /// When true, the `wait_*`/`post_action` helpers return immediately instead of polling a
+    /// long-running operation to completion (az `--no-wait`).
+    no_wait: bool,
 }
 
 impl ArmClient {
     /// Build a client bound to a specific bearer token. Tokens are tenant-scoped, so callers
     /// mint the right one per subscription (see [`crate::context::Context`]).
     pub fn with_token(http: reqwest::Client, token: String) -> Self {
-        Self { http, token }
+        Self {
+            http,
+            token,
+            no_wait: false,
+        }
+    }
+
+    /// Enable fire-and-forget mode: LRO helpers stop polling.
+    pub fn no_wait(mut self, no_wait: bool) -> Self {
+        self.no_wait = no_wait;
+        self
     }
 
     /// GET an ARM resource path (everything after the endpoint host) at `api_version`,
@@ -178,6 +191,9 @@ impl ArmClient {
     /// Poll a resource until its `properties.provisioningState` is terminal. Returns the final
     /// resource on `Succeeded`, errors on `Failed`/`Canceled` or timeout.
     pub async fn wait_provisioning(&self, path: &str, api_version: &str) -> Result<Value> {
+        if self.no_wait {
+            return self.get(path, api_version).await; // return the in-progress resource as-is
+        }
         for _ in 0..POLL_MAX_ATTEMPTS {
             let resource = self.get(path, api_version).await?;
             let state = resource
@@ -200,6 +216,9 @@ impl ArmClient {
 
     /// Poll until the resource at `path` no longer exists (delete completed).
     pub async fn wait_deleted(&self, path: &str, api_version: &str) -> Result<()> {
+        if self.no_wait {
+            return Ok(()); // deletion accepted; don't poll
+        }
         for _ in 0..POLL_MAX_ATTEMPTS {
             match self.get(path, api_version).await {
                 Err(RazError::NotFound(_)) => return Ok(()),
@@ -228,6 +247,9 @@ impl ArmClient {
         if !status.is_success() {
             let body = resp.text().await.unwrap_or_default();
             return Err(map_status(status.as_u16(), path, body));
+        }
+        if self.no_wait {
+            return Ok(()); // action accepted; don't poll the operation
         }
         let op_url = resp
             .headers()

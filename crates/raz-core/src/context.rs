@@ -11,8 +11,10 @@ use crate::output::OutputFormat;
 pub struct GlobalArgs {
     pub subscription: Option<String>,
     pub output: OutputFormat,
-    /// Dotted-path projection of JSON output (a small subset of az's JMESPath `--query`).
+    /// JMESPath projection of the JSON output (az's `--query`).
     pub query: Option<String>,
+    /// Fire-and-forget: don't poll long-running operations to completion (az `--no-wait`).
+    pub no_wait: bool,
 }
 
 /// Shared HTTP client constructor, so login and the ARM client use identical settings.
