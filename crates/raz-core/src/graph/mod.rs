@@ -4,3 +4,4 @@
 
 pub mod client;
 pub mod federated_credential;
+pub mod service_principal;
