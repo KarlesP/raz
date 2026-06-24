@@ -30,7 +30,8 @@ fn account_path(subscription: &str, resource_group: &str, name: &str) -> String 
     )
 }
 
-fn flatten_account(mut v: Value) -> Value {
+fn flatten_account(v: &Value) -> Value {
+    let mut v = v.clone();
     super::enrich_resource(&mut v); // derives resourceGroup from the id
     json!({
         "name": v.get("name").and_then(Value::as_str).unwrap_or(""),
@@ -46,12 +47,7 @@ fn flatten_account(mut v: Value) -> Value {
 pub async fn list_accounts(client: &ArmClient, subscription: &str) -> Result<Value> {
     let path = format!("/subscriptions/{subscription}/providers/{PROVIDER}");
     let body = client.get(&path, API_VERSION).await?;
-    let items = body
-        .get("value")
-        .and_then(Value::as_array)
-        .map(|v| v.iter().cloned().map(flatten_account).collect())
-        .unwrap_or_default();
-    Ok(Value::Array(items))
+    Ok(super::map_list(&body, flatten_account))
 }
 
 /// `raz storage account show`.
@@ -67,7 +63,7 @@ pub async fn show_account(
             API_VERSION,
         )
         .await?;
-    Ok(flatten_account(body))
+    Ok(flatten_account(&body))
 }
 
 /// `raz storage account create` — register the provider, PUT, and wait for provisioning.
@@ -87,7 +83,7 @@ pub async fn create_account(
     let body = json!({ "location": location, "sku": { "name": sku }, "kind": kind });
     client.put(&path, API_VERSION, &body).await?;
     let done = client.wait_provisioning(&path, API_VERSION).await?;
-    Ok(flatten_account(done))
+    Ok(flatten_account(&done))
 }
 
 fn containers_path(subscription: &str, resource_group: &str, account: &str) -> String {
@@ -117,12 +113,7 @@ pub async fn list_containers(
             API_VERSION,
         )
         .await?;
-    let items = body
-        .get("value")
-        .and_then(Value::as_array)
-        .map(|v| v.iter().map(flatten_container).collect())
-        .unwrap_or_default();
-    Ok(Value::Array(items))
+    Ok(super::map_list(&body, flatten_container))
 }
 
 /// `raz storage container create`.

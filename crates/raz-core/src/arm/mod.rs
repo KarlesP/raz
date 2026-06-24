@@ -29,6 +29,18 @@ pub fn resource_table_spec() -> TableSpec {
     ]
 }
 
+/// Map an ARM `{ "value": [...] }` list through `f`, returning a JSON array. Centralizes the
+/// extract-map-collect idiom shared by the per-service `list` functions that carry a custom
+/// `flatten` (the resource-group-enriching siblings use [`enrich_list`]).
+pub(crate) fn map_list(body: &Value, f: impl Fn(&Value) -> Value) -> Value {
+    let items = body
+        .get("value")
+        .and_then(Value::as_array)
+        .map(|a| a.iter().map(f).collect())
+        .unwrap_or_default();
+    Value::Array(items)
+}
+
 /// Flatten an ARM `{ "value": [...] }` list into a JSON array, enriching each item with its
 /// derived `resourceGroup`.
 pub(crate) fn enrich_list(body: Value) -> Value {

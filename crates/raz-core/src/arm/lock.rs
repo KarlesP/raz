@@ -62,12 +62,7 @@ pub async fn create(
 pub async fn list(client: &ArmClient, scope: &str) -> Result<Value> {
     let path = format!("{scope}/providers/Microsoft.Authorization/locks");
     let body = client.get(&path, API_VERSION).await?;
-    let items = body
-        .get("value")
-        .and_then(Value::as_array)
-        .map(|v| v.iter().map(flatten).collect())
-        .unwrap_or_default();
-    Ok(Value::Array(items))
+    Ok(super::map_list(&body, flatten))
 }
 
 /// `raz lock delete` — remove the lock named `name` at `scope`.
