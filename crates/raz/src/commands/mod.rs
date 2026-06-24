@@ -9,6 +9,7 @@ pub mod logout;
 pub mod resource;
 pub mod rest;
 pub mod role;
+pub mod suggest;
 pub mod vm;
 pub mod vnet;
 
@@ -17,7 +18,34 @@ use serde_json::Value;
 use raz_core::context::Context;
 use raz_core::error::{usage, Result};
 use raz_core::output::{self, TableSpec};
+use raz_core::suggest as caf;
 use raz_core::GlobalArgs;
+
+/// Print the CAF naming + ALZ tagging recommendation to stderr before a create, automatically.
+/// Informational only (stderr keeps stdout/JSON clean); shows the recommended scheme, a concrete
+/// example for the target region, and the tag set to apply.
+pub(crate) fn print_caf_recommendation(kind: &str, name: &str, location: &str) {
+    let region = caf::region_abbrev(location);
+    let example = caf::suggest_name(kind, "<workload>", "<env>", &region, "001");
+    let required: Vec<&str> = caf::recommended_tags()
+        .iter()
+        .filter(|t| t.required)
+        .map(|t| t.key)
+        .collect();
+    let tag_args = required
+        .iter()
+        .map(|k| format!("--tag {k}=<{k}>"))
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    eprintln!("\nRecommended based on Microsoft Azure CAF");
+    eprintln!("  Naming scheme : {}", caf::NAME_PATTERN);
+    eprintln!("  Example       : {example}");
+    eprintln!("  You chose     : {name}");
+    eprintln!("  Required tags : {}", required.join(", "));
+    eprintln!("  Optional tags : application, department");
+    eprintln!("  Apply tags    : {tag_args}\n");
+}
 
 /// Parse repeated `key=value` `--tag` arguments into pairs.
 pub(crate) fn parse_tags(pairs: &[String]) -> Result<Vec<(String, String)>> {

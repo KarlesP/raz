@@ -29,10 +29,6 @@ pub enum RazError {
     #[error("request failed: {0}")]
     Http(String),
 
-    /// A command that is recognized but not yet implemented.
-    #[error("not implemented: {0}")]
-    NotImplemented(String),
-
     /// I/O or config persistence error.
     #[error("io error: {0}")]
     Io(String),

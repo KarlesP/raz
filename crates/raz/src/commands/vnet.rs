@@ -87,6 +87,7 @@ pub async fn run(command: VnetCommand, globals: GlobalArgs) -> Result<()> {
             subnet_prefix,
         } => {
             let (ctx, client, sub) = arm_context(globals).await?;
+            super::print_caf_recommendation("vnet", &name, &location);
             eprintln!("Creating vnet '{name}' in {location}…");
             let value = vnet::create(
                 &client,

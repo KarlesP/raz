@@ -123,6 +123,7 @@ pub async fn run(command: VmCommand, globals: GlobalArgs) -> Result<()> {
             admin_password,
         } => {
             let (ctx, client, sub) = arm_context(globals).await?;
+            super::print_caf_recommendation("vm", &name, &location);
             eprintln!("Creating VM '{name}' in {location} (this can take a few minutes)…");
             let value = vm::create(
                 &client,

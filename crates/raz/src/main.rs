@@ -94,6 +94,11 @@ enum TopCommand {
     },
     /// Make an arbitrary authenticated ARM/Graph REST call.
     Rest(commands::rest::RestArgs),
+    /// Suggest standard tags and CAF-compliant resource names (offline).
+    Suggest {
+        #[command(subcommand)]
+        command: commands::suggest::SuggestCommand,
+    },
 }
 
 #[tokio::main]
@@ -129,5 +134,6 @@ async fn run(cli: Cli) -> Result<(), RazError> {
         TopCommand::Vnet { command } => commands::vnet::run(command, globals).await,
         TopCommand::Vm { command } => commands::vm::run(command, globals).await,
         TopCommand::Rest(args) => commands::rest::run(args, globals).await,
+        TopCommand::Suggest { command } => commands::suggest::run(command, globals).await,
     }
 }
