@@ -6,7 +6,7 @@ use clap::Args;
 
 use raz_core::arm::{group, policy, resource};
 use raz_core::error::Result;
-use raz_core::{advisor, GlobalArgs};
+use raz_core::{advisor, llm, GlobalArgs};
 
 use super::arm_context;
 
@@ -18,10 +18,22 @@ pub struct AdviseArgs {
     /// Emit the structured profile as JSON instead of the readable report.
     #[arg(long)]
     json: bool,
+    /// Generate a natural-language review via an OpenAI-compatible LLM endpoint.
+    #[arg(long)]
+    summary: bool,
+    /// LLM endpoint (OpenAI-compatible), e.g. a local llama.cpp / mistral.rs server.
+    #[arg(long, default_value = "http://localhost:8080/v1")]
+    endpoint: String,
+    /// Model name the endpoint expects (local servers usually accept anything).
+    #[arg(long, default_value = "local")]
+    model: String,
+    /// Optional API key for the endpoint.
+    #[arg(long)]
+    api_key: Option<String>,
 }
 
 pub async fn run(args: AdviseArgs, globals: GlobalArgs) -> Result<()> {
-    let (_ctx, client, sub) = arm_context(globals).await?;
+    let (ctx, client, sub) = arm_context(globals).await?;
     let resources = resource::list(&client, &sub, None, args.service.as_deref()).await?;
     let groups = group::list(&client, &sub).await?;
     let governance = policy::scan(&client, &sub, None).await?;
@@ -30,8 +42,28 @@ pub async fn run(args: AdviseArgs, globals: GlobalArgs) -> Result<()> {
 
     if args.json {
         println!("{}", serde_json::to_string_pretty(&profile)?);
-    } else {
-        print_report(&profile);
+        return Ok(());
+    }
+
+    print_report(&profile);
+
+    if args.summary {
+        eprintln!(
+            "\nGenerating review via {} (model: {})…",
+            args.endpoint, args.model
+        );
+        let review = llm::complete(
+            &ctx.http,
+            &args.endpoint,
+            &args.model,
+            args.api_key.as_deref(),
+            "You are a senior Azure architecture reviewer. Be concise and concrete; explain what the \
+             architecture follows, then list needs, worries, and opportunities, and flag anything \
+             likely out of scope.",
+            &advisor::build_prompt(&profile),
+        )
+        .await?;
+        println!("\nAI Review:\n{review}");
     }
     Ok(())
 }
@@ -89,7 +121,5 @@ fn print_report(p: &advisor::Profile) {
             println!("  ⚠ {w}");
         }
     }
-    println!(
-        "\n(Run `raz advise --summary` for a natural-language review once the LLM advisor ships.)"
-    );
+    println!("\n(Add `--summary --endpoint <url>` for a natural-language AI review.)");
 }

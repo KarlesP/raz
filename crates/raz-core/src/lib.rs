@@ -13,6 +13,7 @@ pub mod config;
 pub mod context;
 pub mod error;
 pub mod graph;
+pub mod llm;
 mod odata;
 pub mod output;
 pub mod suggest;
