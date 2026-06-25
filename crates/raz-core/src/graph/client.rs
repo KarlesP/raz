@@ -5,25 +5,40 @@ use serde_json::Value;
 
 use crate::error::{RazError, Result};
 
-const GRAPH_ENDPOINT: &str = "https://graph.microsoft.com/v1.0";
-
 pub struct GraphClient {
     http: reqwest::Client,
     token: String,
+    /// Microsoft Graph v1.0 base URL for the active cloud.
+    base: String,
+    trace: bool,
 }
 
 impl GraphClient {
-    pub fn new(http: reqwest::Client, token: String) -> Self {
-        Self { http, token }
+    pub fn new(http: reqwest::Client, token: String, base: String) -> Self {
+        Self {
+            http,
+            token,
+            base,
+            trace: false,
+        }
+    }
+
+    /// Enable request tracing to stderr (az `--debug`).
+    pub fn trace(mut self, trace: bool) -> Self {
+        self.trace = trace;
+        self
+    }
+
+    fn log(&self, method: &str, url: &str) {
+        if self.trace {
+            eprintln!("raz: → {method} {url}");
+        }
     }
 
     pub async fn get(&self, path: &str) -> Result<Value> {
-        let resp = self
-            .http
-            .get(format!("{GRAPH_ENDPOINT}{path}"))
-            .bearer_auth(&self.token)
-            .send()
-            .await?;
+        let url = format!("{}{path}", self.base);
+        self.log("GET", &url);
+        let resp = self.http.get(url).bearer_auth(&self.token).send().await?;
         let status = resp.status();
         if status.is_success() {
             return Ok(resp.json::<Value>().await?);
@@ -36,9 +51,11 @@ impl GraphClient {
     }
 
     pub async fn post(&self, path: &str, body: &Value) -> Result<Value> {
+        let url = format!("{}{path}", self.base);
+        self.log("POST", &url);
         let resp = self
             .http
-            .post(format!("{GRAPH_ENDPOINT}{path}"))
+            .post(url)
             .bearer_auth(&self.token)
             .json(body)
             .send()
@@ -56,9 +73,11 @@ impl GraphClient {
     }
 
     pub async fn delete(&self, path: &str) -> Result<()> {
+        let url = format!("{}{path}", self.base);
+        self.log("DELETE", &url);
         let resp = self
             .http
-            .delete(format!("{GRAPH_ENDPOINT}{path}"))
+            .delete(url)
             .bearer_auth(&self.token)
             .send()
             .await?;

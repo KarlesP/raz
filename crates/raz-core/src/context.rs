@@ -15,6 +15,8 @@ pub struct GlobalArgs {
     pub query: Option<String>,
     /// Fire-and-forget: don't poll long-running operations to completion (az `--no-wait`).
     pub no_wait: bool,
+    /// Trace HTTP requests to stderr (az `--debug` / `--verbose`).
+    pub debug: bool,
 }
 
 /// Shared HTTP client constructor, so login and the ARM client use identical settings.
@@ -36,6 +38,11 @@ impl Context {
             profile: Profile::load()?,
             globals,
         })
+    }
+
+    /// The active Azure cloud (`raz cloud set`), defaulting to public AzureCloud.
+    pub fn cloud(&self) -> &'static crate::cloud::Cloud {
+        crate::cloud::resolve(self.profile.cloud.as_deref())
     }
 
     /// Resolve a region: the explicit `--location` if given, else the configured default
@@ -89,11 +96,13 @@ impl Context {
         let cached = self.profile.token.as_ref().ok_or(RazError::NotLoggedIn)?;
         if !tenant.is_empty() {
             if let Some(refresh) = &cached.refresh_token {
+                let cloud = self.cloud();
                 let tok = crate::auth::device_code::exchange_refresh_token(
                     &self.http,
+                    cloud.authority,
                     tenant,
                     refresh,
-                    crate::auth::device_code::DEFAULT_SCOPE,
+                    &cloud.arm_scope(),
                 )
                 .await?;
                 return Ok(tok.access_token);
@@ -124,9 +133,10 @@ impl Context {
         })?;
         let tok = crate::auth::device_code::exchange_refresh_token(
             &self.http,
+            self.cloud().authority,
             &tenant,
             refresh,
-            crate::auth::device_code::GRAPH_SCOPE,
+            &self.cloud().graph_scope(),
         )
         .await?;
         Ok(tok.access_token)
@@ -149,9 +159,10 @@ impl Context {
         })?;
         let tok = crate::auth::device_code::exchange_refresh_token(
             &self.http,
+            self.cloud().authority,
             &tenant,
             refresh,
-            crate::auth::device_code::KEYVAULT_SCOPE,
+            &self.cloud().vault_scope(),
         )
         .await?;
         Ok(tok.access_token)

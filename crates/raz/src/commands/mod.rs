@@ -6,9 +6,11 @@ pub mod ad;
 pub mod aks;
 pub mod appservice;
 pub mod budget;
+pub mod cloud;
 pub mod completion;
 pub mod configure;
 pub mod deployment;
+pub mod extension;
 pub mod group;
 pub mod keyvault;
 pub mod lock;
@@ -97,9 +99,12 @@ pub(crate) async fn arm_context(
     globals: GlobalArgs,
 ) -> Result<(Context, raz_core::arm::client::ArmClient, String)> {
     let no_wait = globals.no_wait;
+    let debug = globals.debug;
     let ctx = Context::load(globals)?;
     let (subscription, token) = ctx.subscription_and_token().await?;
-    let client =
-        raz_core::arm::client::ArmClient::with_token(ctx.http.clone(), token).no_wait(no_wait);
+    let client = raz_core::arm::client::ArmClient::with_token(ctx.http.clone(), token)
+        .endpoint(ctx.cloud().arm)
+        .no_wait(no_wait)
+        .trace(debug);
     Ok((ctx, client, subscription))
 }

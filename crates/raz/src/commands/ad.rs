@@ -107,7 +107,9 @@ pub async fn run(command: AdCommand, globals: GlobalArgs) -> Result<()> {
 }
 
 async fn fed_cred(ctx: &Context, command: FedCredCommand) -> Result<()> {
-    let client = GraphClient::new(new_http_client(), ctx.graph_token().await?);
+    let token = ctx.graph_token().await?;
+    let client = GraphClient::new(new_http_client(), token, ctx.cloud().graph_base())
+        .trace(ctx.globals.debug);
     match command {
         FedCredCommand::Create {
             id,
@@ -148,7 +150,9 @@ async fn create_for_rbac(
     scope: Option<String>,
 ) -> Result<()> {
     // 1. App + service principal + secret (Graph).
-    let graph = GraphClient::new(new_http_client(), ctx.graph_token().await?);
+    let graph_token = ctx.graph_token().await?;
+    let graph = GraphClient::new(new_http_client(), graph_token, ctx.cloud().graph_base())
+        .trace(ctx.globals.debug);
     let created = sp::create_with_secret(&graph, name).await?;
     let object_id = created["objectId"].as_str().unwrap_or_default().to_string();
     let app_id = created["appId"].as_str().unwrap_or_default().to_string();
@@ -161,7 +165,9 @@ async fn create_for_rbac(
         .map(|s| s.tenant_id.clone())
         .unwrap_or_default();
     let scope = scope.unwrap_or_else(|| format!("/subscriptions/{sub_id}"));
-    let arm = ArmClient::with_token(new_http_client(), token);
+    let arm = ArmClient::with_token(new_http_client(), token)
+        .endpoint(ctx.cloud().arm)
+        .trace(ctx.globals.debug);
 
     // A freshly created principal is eventually consistent; retry the assignment briefly.
     let mut attempt = 0;

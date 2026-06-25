@@ -7,6 +7,7 @@
 
 pub mod arm;
 pub mod auth;
+pub mod cloud;
 pub mod config;
 pub mod context;
 pub mod error;

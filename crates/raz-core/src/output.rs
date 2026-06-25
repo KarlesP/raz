@@ -137,7 +137,8 @@ mod tests {
             "Table".parse::<OutputFormat>().unwrap(),
             OutputFormat::Table
         );
-        assert!("yaml".parse::<OutputFormat>().is_err());
+        assert_eq!("YAML".parse::<OutputFormat>().unwrap(), OutputFormat::Yaml);
+        assert!("xml".parse::<OutputFormat>().is_err());
     }
 
     #[test]
