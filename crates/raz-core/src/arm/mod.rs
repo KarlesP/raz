@@ -72,7 +72,7 @@ pub(crate) fn enrich_resource(item: &mut Value) {
 }
 
 /// Extract the resource group (case-insensitive segment match) from an ARM resource id.
-fn resource_group_from_id(id: &str) -> Option<String> {
+pub(crate) fn resource_group_from_id(id: &str) -> Option<String> {
     let parts: Vec<&str> = id.split('/').collect();
     parts
         .iter()
