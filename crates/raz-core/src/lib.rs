@@ -11,6 +11,7 @@ pub mod auth;
 pub mod cloud;
 pub mod config;
 pub mod context;
+pub mod diagram;
 pub mod error;
 pub mod graph;
 pub mod llm;
