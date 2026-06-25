@@ -36,6 +36,16 @@ pub struct Subscription {
     pub is_default: bool,
 }
 
+/// Persisted defaults (`raz configure`), the az `defaults.*` analogue. Applied when a command
+/// doesn't override them.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct Defaults {
+    #[serde(default)]
+    pub location: Option<String>,
+    #[serde(default)]
+    pub output: Option<String>,
+}
+
 /// The whole persisted profile.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Profile {
@@ -45,6 +55,11 @@ pub struct Profile {
     pub subscriptions: Vec<Subscription>,
     #[serde(default)]
     pub token: Option<CachedToken>,
+    #[serde(default)]
+    pub defaults: Defaults,
+    /// Active Azure cloud name (`raz cloud set`); None means AzureCloud (public).
+    #[serde(default)]
+    pub cloud: Option<String>,
 }
 
 impl Profile {
@@ -129,6 +144,8 @@ mod tests {
                 refresh_token: Some("ref".into()),
                 expires_on: 42,
             }),
+            defaults: Default::default(),
+            cloud: None,
         };
         let json = serde_json::to_string(&p).unwrap();
         let back: Profile = serde_json::from_str(&json).unwrap();

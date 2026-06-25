@@ -19,6 +19,18 @@ pub struct LoginArgs {
     #[arg(long, short = 't', env = "AZURE_TENANT_ID")]
     pub tenant: Option<String>,
 
+    /// Log in using managed identity.
+    #[arg(long, short = 'i', help_heading = "Managed Identity")]
+    pub identity: bool,
+
+    /// Object ID of the user-assigned managed identity.
+    #[arg(long, help_heading = "Managed Identity")]
+    pub object_id: Option<String>,
+
+    /// Resource ID of the user-assigned managed identity.
+    #[arg(long, help_heading = "Managed Identity")]
+    pub resource_id: Option<String>,
+
     /// Sign in as a service principal (non-interactive) instead of the device-code flow.
     #[arg(long)]
     pub service_principal: bool,
@@ -44,11 +56,17 @@ pub struct LoginArgs {
 pub async fn run(args: LoginArgs, _globals: &GlobalArgs) -> Result<()> {
     let http = new_http_client();
     let mut profile = Profile::load()?;
+    let cloud = raz_core::cloud::resolve(profile.cloud.as_deref());
+    if cloud.name != "AzureCloud" {
+        println!("Cloud: {}", cloud.name);
+    }
 
-    let (tenant, token) = if args.service_principal {
-        service_principal_login(&http, &args).await?
+    let (tenant, token) = if args.identity {
+        identity_login(&http, cloud, &args).await?
+    } else if args.service_principal {
+        service_principal_login(&http, cloud, &args).await?
     } else {
-        device_code_login(&http, &profile, &args).await?
+        device_code_login(&http, cloud, &profile, &args).await?
     };
 
     // Persist the token first so it can be reused for discovery and later commands.
@@ -58,7 +76,7 @@ pub async fn run(args: LoginArgs, _globals: &GlobalArgs) -> Result<()> {
 
     // Enumerate the tenants/subscriptions the identity can reach. With a refresh token this is
     // cross-tenant; a service-principal token has none, so it degrades to its single tenant.
-    let (tenants, subs) = discover_all(&http, &token).await?;
+    let (tenants, subs) = discover_all(&http, cloud, &token).await?;
 
     if !tenants.is_empty() {
         println!("\nAvailable tenants ({}):", tenants.len());
@@ -94,6 +112,7 @@ pub async fn run(args: LoginArgs, _globals: &GlobalArgs) -> Result<()> {
 /// used, else the multi-tenant authority.
 async fn device_code_login(
     http: &reqwest::Client,
+    cloud: &raz_core::cloud::Cloud,
     profile: &Profile,
     args: &LoginArgs,
 ) -> Result<(String, TokenResponse)> {
@@ -104,7 +123,7 @@ async fn device_code_login(
         .unwrap_or_else(|| "organizations".to_string());
     println!("Signing in to tenant: {tenant}");
 
-    let token = device_code::run_flow(http, &tenant, |dc| {
+    let token = device_code::run_flow(http, cloud.authority, &tenant, &cloud.arm_scope(), |dc| {
         println!("{}", dc.message);
         device_code::open_verification(dc);
     })
@@ -112,10 +131,37 @@ async fn device_code_login(
     Ok((tenant, token))
 }
 
+/// Managed-identity sign-in via IMDS. No refresh token; the ARM access token is cached and used
+/// directly. `--client-id` selects a user-assigned identity.
+async fn identity_login(
+    http: &reqwest::Client,
+    cloud: &raz_core::cloud::Cloud,
+    args: &LoginArgs,
+) -> Result<(String, TokenResponse)> {
+    use raz_core::auth::managed_identity;
+    println!("Signing in with managed identity…");
+    let token = managed_identity::acquire(
+        http,
+        &cloud.arm_resource(),
+        args.client_id.as_deref(),
+        args.object_id.as_deref(),
+        args.resource_id.as_deref(),
+    )
+    .await?;
+    // Match az: take the tenant from the token's `tid` claim (override with --tenant).
+    let tenant = args
+        .tenant
+        .clone()
+        .or_else(|| managed_identity::tenant_from_token(&token.access_token))
+        .unwrap_or_default();
+    Ok((tenant, token))
+}
+
 /// Non-interactive service-principal sign-in: client secret if given, otherwise an OIDC
 /// federated token (`--federated-token`, or fetched from the GitHub Actions OIDC provider).
 async fn service_principal_login(
     http: &reqwest::Client,
+    cloud: &raz_core::cloud::Cloud,
     args: &LoginArgs,
 ) -> Result<(String, TokenResponse)> {
     let client_id = args
@@ -129,7 +175,15 @@ async fn service_principal_login(
 
     let token = if let Some(secret) = &args.client_secret {
         println!("Signing in as service principal {client_id} (client secret) to {tenant}");
-        sp::acquire_client_secret(http, &tenant, &client_id, secret).await?
+        sp::acquire_client_secret(
+            http,
+            cloud.authority,
+            cloud.arm,
+            &tenant,
+            &client_id,
+            secret,
+        )
+        .await?
     } else {
         let assertion = match &args.federated_token {
             Some(t) => t.clone(),
@@ -139,7 +193,15 @@ async fn service_principal_login(
             }
         };
         println!("Signing in as service principal {client_id} (federated token) to {tenant}");
-        sp::acquire_federated(http, &tenant, &client_id, &assertion).await?
+        sp::acquire_federated(
+            http,
+            cloud.authority,
+            cloud.arm,
+            &tenant,
+            &client_id,
+            &assertion,
+        )
+        .await?
     };
     Ok((tenant, token))
 }

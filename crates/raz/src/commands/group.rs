@@ -2,7 +2,6 @@
 
 use clap::Subcommand;
 
-use raz_core::arm::client::DEFAULT_LOCATION;
 use raz_core::arm::group;
 use raz_core::error::{usage, Result};
 use raz_core::GlobalArgs;
@@ -22,8 +21,8 @@ pub enum GroupCommand {
     Create {
         #[arg(long, short = 'n')]
         name: String,
-        #[arg(long, short = 'l', default_value = DEFAULT_LOCATION)]
-        location: String,
+        #[arg(long, short = 'l')]
+        location: Option<String>,
     },
     /// Delete a resource group and everything in it. Requires --yes to confirm.
     Delete {
@@ -49,6 +48,7 @@ pub async fn run(command: GroupCommand, globals: GlobalArgs) -> Result<()> {
         }
         GroupCommand::Create { name, location } => {
             let (ctx, client, sub) = arm_context(globals).await?;
+            let location = ctx.resolve_location(location);
             super::print_caf_recommendation("rg", &name, &location);
             let value = group::create(&client, &sub, &name, &location).await?;
             emit(&ctx, value, Some(&group::table_spec()))

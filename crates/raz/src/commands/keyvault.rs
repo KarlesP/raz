@@ -27,8 +27,8 @@ pub enum KeyvaultCommand {
         resource_group: String,
         #[arg(long, short = 'n')]
         name: String,
-        #[arg(long, short = 'l', default_value = "westeurope")]
-        location: String,
+        #[arg(long, short = 'l')]
+        location: Option<String>,
         #[arg(long, default_value = "standard")]
         sku: String,
     },
@@ -85,6 +85,7 @@ pub async fn run(command: KeyvaultCommand, globals: GlobalArgs) -> Result<()> {
             sku,
         } => {
             let (ctx, client, sub) = arm_context(globals).await?;
+            let location = ctx.resolve_location(location);
             let tenant = ctx
                 .active_subscription()
                 .map(|s| s.tenant_id.clone())
@@ -109,13 +110,14 @@ pub async fn run(command: KeyvaultCommand, globals: GlobalArgs) -> Result<()> {
 async fn secret(command: SecretCommand, globals: GlobalArgs) -> Result<()> {
     let ctx = Context::load(globals)?;
     let token = ctx.vault_token().await?;
+    let suffix = ctx.cloud().vault_suffix;
     match command {
         SecretCommand::Set {
             vault_name,
             name,
             value,
         } => {
-            let url = secret_url(&vault_name, &name);
+            let url = secret_url(&vault_name, suffix, &name);
             let resp = ctx
                 .http
                 .put(&url)
@@ -127,7 +129,7 @@ async fn secret(command: SecretCommand, globals: GlobalArgs) -> Result<()> {
             emit(&ctx, secret_row(&name, &body), Some(&secret_table_spec()))
         }
         SecretCommand::Show { vault_name, name } => {
-            let url = secret_url(&vault_name, &name);
+            let url = secret_url(&vault_name, suffix, &name);
             let resp = ctx.http.get(&url).bearer_auth(&token).send().await?;
             let body = read_json(resp).await?;
             emit(&ctx, secret_row(&name, &body), Some(&secret_table_spec()))
@@ -135,8 +137,8 @@ async fn secret(command: SecretCommand, globals: GlobalArgs) -> Result<()> {
     }
 }
 
-fn secret_url(vault: &str, name: &str) -> String {
-    format!("https://{vault}.vault.azure.net/secrets/{name}?api-version=7.4")
+fn secret_url(vault: &str, suffix: &str, name: &str) -> String {
+    format!("https://{vault}.{suffix}/secrets/{name}?api-version=7.4")
 }
 
 fn secret_row(name: &str, body: &Value) -> Value {

@@ -15,8 +15,11 @@ use crate::error::{usage, Result};
 pub enum OutputFormat {
     #[default]
     Json,
+    Yaml,
     Table,
     Tsv,
+    /// Suppress result output entirely (az `--output none`).
+    None,
 }
 
 impl FromStr for OutputFormat {
@@ -24,10 +27,12 @@ impl FromStr for OutputFormat {
     fn from_str(s: &str) -> Result<Self> {
         match s.to_ascii_lowercase().as_str() {
             "json" => Ok(OutputFormat::Json),
+            "yaml" => Ok(OutputFormat::Yaml),
             "table" => Ok(OutputFormat::Table),
             "tsv" => Ok(OutputFormat::Tsv),
+            "none" => Ok(OutputFormat::None),
             other => Err(usage(format!(
-                "unknown output format '{other}' (expected json|table|tsv)"
+                "unknown output format '{other}' (expected json|yaml|table|tsv|none)"
             ))),
         }
     }
@@ -41,6 +46,8 @@ pub type TableSpec = Vec<(&'static str, &'static str)>;
 pub fn render(value: &Value, format: OutputFormat, table: Option<&TableSpec>) -> Result<String> {
     match format {
         OutputFormat::Json => Ok(serde_json::to_string_pretty(value)?),
+        OutputFormat::Yaml => serde_yaml::to_string(value)
+            .map_err(|e| crate::error::RazError::Other(format!("yaml: {e}"))),
         OutputFormat::Table => match table {
             Some(spec) => Ok(render_table(value, spec)),
             None => Ok(serde_json::to_string_pretty(value)?),
@@ -49,6 +56,7 @@ pub fn render(value: &Value, format: OutputFormat, table: Option<&TableSpec>) ->
             Some(spec) => Ok(render_tsv(value, spec)),
             None => Ok(tsv_scalar(value)),
         },
+        OutputFormat::None => Ok(String::new()),
     }
 }
 
@@ -99,23 +107,18 @@ fn tsv_scalar(value: &Value) -> String {
     }
 }
 
-/// Apply a minimal dotted-path `--query` (a small subset of az's JMESPath). Supports
-/// object keys and numeric array indices, e.g. `subscriptions.0.name`. Unknown paths yield
-/// JSON null. This is deliberately not full JMESPath — that is out of scope.
+/// Apply a JMESPath `--query` to the result, like az. Supports the full JMESPath grammar
+/// (projections, filters, functions, pipes). An empty query returns the value unchanged; an
+/// invalid expression or no match yields JSON null.
 pub fn apply_query(value: &Value, query: &str) -> Value {
-    let mut cur = value;
-    for segment in query.split('.').filter(|s| !s.is_empty()) {
-        let next = if let Ok(idx) = segment.parse::<usize>() {
-            cur.get(idx)
-        } else {
-            cur.get(segment)
-        };
-        match next {
-            Some(v) => cur = v,
-            None => return Value::Null,
-        }
+    if query.trim().is_empty() {
+        return value.clone();
     }
-    cur.clone()
+    let result = jmespath::compile(query).and_then(|expr| expr.search(value));
+    match result {
+        Ok(var) => serde_json::to_value(&*var).unwrap_or(Value::Null),
+        Err(_) => Value::Null,
+    }
 }
 
 #[cfg(test)]
@@ -134,7 +137,8 @@ mod tests {
             "Table".parse::<OutputFormat>().unwrap(),
             OutputFormat::Table
         );
-        assert!("yaml".parse::<OutputFormat>().is_err());
+        assert_eq!("YAML".parse::<OutputFormat>().unwrap(), OutputFormat::Yaml);
+        assert!("xml".parse::<OutputFormat>().is_err());
     }
 
     #[test]
@@ -171,10 +175,11 @@ mod tests {
     }
 
     #[test]
-    fn query_traverses_objects_and_indices() {
+    fn query_runs_jmespath() {
         let v = json!({"subs": [{"name": "Dev"}, {"name": "Prod"}]});
-        assert_eq!(apply_query(&v, "subs.1.name"), json!("Prod"));
-        assert_eq!(apply_query(&v, "subs.5"), Value::Null);
+        assert_eq!(apply_query(&v, "subs[1].name"), json!("Prod"));
+        assert_eq!(apply_query(&v, "subs[].name"), json!(["Dev", "Prod"]));
+        assert_eq!(apply_query(&v, "subs[5]"), Value::Null);
         assert_eq!(apply_query(&v, ""), v);
     }
 }

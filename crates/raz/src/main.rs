@@ -7,6 +7,7 @@ mod commands;
 mod schema;
 
 use clap::{Args, Parser, Subcommand};
+use clap_complete::Shell;
 
 use raz_core::error::RazError;
 use raz_core::{GlobalArgs, OutputFormat};
@@ -32,21 +33,40 @@ struct GlobalOpts {
     #[arg(long, short = 's', global = true)]
     subscription: Option<String>,
 
-    /// Output format.
-    #[arg(long, short = 'o', global = true, default_value = "json")]
-    output: String,
+    /// Output format. Defaults to the configured default (`raz configure`), else json.
+    #[arg(long, short = 'o', global = true)]
+    output: Option<String>,
 
-    /// Minimal dotted-path projection of the JSON result (subset of JMESPath).
+    /// JMESPath query applied to the JSON result (like az `--query`).
     #[arg(long, global = true)]
     query: Option<String>,
+
+    /// Don't wait for long-running operations to finish (az `--no-wait`).
+    #[arg(long, global = true)]
+    no_wait: bool,
+
+    /// Trace HTTP requests to stderr.
+    #[arg(long, global = true)]
+    debug: bool,
+
+    /// Alias for --debug.
+    #[arg(long, global = true)]
+    verbose: bool,
 }
 
 impl GlobalOpts {
-    fn to_core(&self) -> Result<GlobalArgs, RazError> {
+    fn to_core(&self, defaults: &raz_core::config::Defaults) -> Result<GlobalArgs, RazError> {
+        // Output precedence: explicit -o, then the configured default, then json.
+        let output = match self.output.clone().or_else(|| defaults.output.clone()) {
+            Some(s) => s.parse::<OutputFormat>()?,
+            None => OutputFormat::Json,
+        };
         Ok(GlobalArgs {
             subscription: self.subscription.clone(),
-            output: self.output.parse::<OutputFormat>()?,
+            output,
             query: self.query.clone(),
+            no_wait: self.no_wait,
+            debug: self.debug || self.verbose,
         })
     }
 }
@@ -144,6 +164,49 @@ enum TopCommand {
         #[command(subcommand)]
         command: commands::network::NetworkCommand,
     },
+    /// Manage AKS clusters and fetch kubeconfig.
+    Aks {
+        #[command(subcommand)]
+        command: commands::aks::AksCommand,
+    },
+    /// Azure Monitor — metrics and activity log.
+    Monitor {
+        #[command(subcommand)]
+        command: commands::monitor::MonitorCommand,
+    },
+    /// Manage App Service web apps.
+    Webapp {
+        #[command(subcommand)]
+        command: commands::webapp::WebappCommand,
+    },
+    /// Manage App Service plans.
+    Appservice {
+        #[command(subcommand)]
+        command: commands::appservice::AppserviceCommand,
+    },
+    /// Print a shell completion script (bash, zsh, fish, powershell, elvish).
+    Completion {
+        #[arg(value_enum)]
+        shell: Shell,
+    },
+    /// View or set persisted defaults (location / output) in `~/.raz`.
+    Configure(commands::configure::ConfigureArgs),
+    /// Wait until a resource reaches a state (created / deleted / exists / custom).
+    Wait(commands::wait::WaitArgs),
+    /// View or set the active Azure cloud (public / Gov / China).
+    Cloud {
+        #[command(subcommand)]
+        command: commands::cloud::CloudCommand,
+    },
+    /// Manage raz extensions (not available yet — see the roadmap).
+    Extension {
+        #[command(subcommand)]
+        command: commands::extension::ExtensionCommand,
+    },
+    /// Analyze the active subscription's architecture (naming, tags, governance) + guardrails.
+    Advise(commands::advise::AdviseArgs),
+    /// Emit a Mermaid topology diagram of the subscription / resource group.
+    Diagram(commands::diagram::DiagramArgs),
 }
 
 #[tokio::main]
@@ -167,7 +230,8 @@ async fn main() {
 }
 
 async fn run(cli: Cli) -> Result<(), RazError> {
-    let globals = cli.globals.to_core()?;
+    let defaults = raz_core::config::Profile::load()?.defaults;
+    let globals = cli.globals.to_core(&defaults)?;
     match cli.command {
         TopCommand::Login(args) => commands::login::run(args, &globals).await,
         TopCommand::Logout => commands::logout::run().await,
@@ -189,5 +253,16 @@ async fn run(cli: Cli) -> Result<(), RazError> {
         TopCommand::Storage { command } => commands::storage::run(command, globals).await,
         TopCommand::Keyvault { command } => commands::keyvault::run(command, globals).await,
         TopCommand::Network { command } => commands::network::run(command, globals).await,
+        TopCommand::Aks { command } => commands::aks::run(command, globals).await,
+        TopCommand::Monitor { command } => commands::monitor::run(command, globals).await,
+        TopCommand::Webapp { command } => commands::webapp::run(command, globals).await,
+        TopCommand::Appservice { command } => commands::appservice::run(command, globals).await,
+        TopCommand::Completion { shell } => commands::completion::run(shell),
+        TopCommand::Configure(args) => commands::configure::run(args, globals),
+        TopCommand::Wait(args) => commands::wait::run(args, globals).await,
+        TopCommand::Cloud { command } => commands::cloud::run(command, globals),
+        TopCommand::Extension { command } => commands::extension::run(command),
+        TopCommand::Advise(args) => commands::advise::run(args, globals).await,
+        TopCommand::Diagram(args) => commands::diagram::run(args, globals).await,
     }
 }

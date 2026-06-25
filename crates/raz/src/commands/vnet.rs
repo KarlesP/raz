@@ -2,7 +2,6 @@
 
 use clap::Subcommand;
 
-use raz_core::arm::client::DEFAULT_LOCATION;
 use raz_core::arm::vnet::{self, VnetCreate};
 use raz_core::error::Result;
 use raz_core::GlobalArgs;
@@ -29,8 +28,8 @@ pub enum VnetCommand {
         #[arg(long, short = 'n')]
         name: String,
         /// Azure region.
-        #[arg(long, short = 'l', default_value = DEFAULT_LOCATION)]
-        location: String,
+        #[arg(long, short = 'l')]
+        location: Option<String>,
         /// VNet address space.
         #[arg(long, default_value = "10.0.0.0/16")]
         address_prefix: String,
@@ -87,6 +86,7 @@ pub async fn run(command: VnetCommand, globals: GlobalArgs) -> Result<()> {
             subnet_prefix,
         } => {
             let (ctx, client, sub) = arm_context(globals).await?;
+            let location = ctx.resolve_location(location);
             super::print_caf_recommendation("vnet", &name, &location);
             eprintln!("Creating vnet '{name}' in {location}…");
             let value = vnet::create(

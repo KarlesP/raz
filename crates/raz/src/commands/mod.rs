@@ -3,13 +3,22 @@
 
 pub mod account;
 pub mod ad;
+pub mod advise;
+pub mod aks;
+pub mod appservice;
 pub mod budget;
+pub mod cloud;
+pub mod completion;
+pub mod configure;
 pub mod deployment;
+pub mod diagram;
+pub mod extension;
 pub mod group;
 pub mod keyvault;
 pub mod lock;
 pub mod login;
 pub mod logout;
+pub mod monitor;
 pub mod network;
 pub mod policy;
 pub mod resource;
@@ -21,6 +30,8 @@ pub mod suggest;
 pub mod tag;
 pub mod vm;
 pub mod vnet;
+pub mod wait;
+pub mod webapp;
 
 use serde_json::Value;
 
@@ -71,6 +82,10 @@ pub(crate) fn parse_tags(pairs: &[String]) -> Result<Vec<(String, String)>> {
 /// Render a command result to stdout honoring the global `--output` and `--query`,
 /// matching how az pipes every result through its output system.
 pub(crate) fn emit(ctx: &Context, value: Value, table: Option<&TableSpec>) -> Result<()> {
+    // `--output none`: suppress result output entirely (az parity).
+    if matches!(ctx.globals.output, raz_core::OutputFormat::None) {
+        return Ok(());
+    }
     let projected = match &ctx.globals.query {
         Some(q) => output::apply_query(&value, q),
         None => value,
@@ -85,8 +100,13 @@ pub(crate) fn emit(ctx: &Context, value: Value, table: Option<&TableSpec>) -> Re
 pub(crate) async fn arm_context(
     globals: GlobalArgs,
 ) -> Result<(Context, raz_core::arm::client::ArmClient, String)> {
+    let no_wait = globals.no_wait;
+    let debug = globals.debug;
     let ctx = Context::load(globals)?;
     let (subscription, token) = ctx.subscription_and_token().await?;
-    let client = raz_core::arm::client::ArmClient::with_token(ctx.http.clone(), token);
+    let client = raz_core::arm::client::ArmClient::with_token(ctx.http.clone(), token)
+        .endpoint(ctx.cloud().arm)
+        .no_wait(no_wait)
+        .trace(debug);
     Ok((ctx, client, subscription))
 }

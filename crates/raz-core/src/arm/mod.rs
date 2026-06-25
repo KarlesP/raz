@@ -1,12 +1,15 @@
 //! Azure Resource Manager access. [`client::ArmClient`] is the REST transport; [`group`],
 //! [`vnet`], and [`vm`] hold the per-service operations (one module per az command group).
 
+pub mod aks;
+pub mod appservice;
 pub mod budget;
 pub mod client;
 pub mod deployment;
 pub mod group;
 pub mod keyvault;
 pub mod lock;
+pub mod monitor;
 pub mod network;
 pub mod policy;
 pub mod resource;
@@ -16,6 +19,7 @@ pub mod subscription;
 pub mod tag;
 pub mod vm;
 pub mod vnet;
+pub mod wait;
 
 use crate::output::TableSpec;
 use serde_json::Value;

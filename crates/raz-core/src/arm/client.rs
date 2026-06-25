@@ -46,9 +46,10 @@ pub struct Tenant {
 /// no refresh token is available. The first subscription found is marked default.
 pub async fn discover_all(
     http: &reqwest::Client,
+    cloud: &crate::cloud::Cloud,
     token: &TokenResponse,
 ) -> Result<(Vec<Tenant>, Vec<Subscription>)> {
-    let home = ArmClient::with_token(http.clone(), token.access_token.clone());
+    let home = ArmClient::with_token(http.clone(), token.access_token.clone()).endpoint(cloud.arm);
     let tenants = home.list_tenants().await.unwrap_or_default();
 
     let mut subs: Vec<Subscription> = Vec::new();
@@ -56,15 +57,16 @@ pub async fn discover_all(
         for tenant in &tenants {
             let Ok(tok) = device_code::exchange_refresh_token(
                 http,
+                cloud.authority,
                 &tenant.id,
                 refresh,
-                device_code::DEFAULT_SCOPE,
+                &cloud.arm_scope(),
             )
             .await
             else {
                 continue; // tenant not redeemable for this identity; skip it
             };
-            let client = ArmClient::with_token(http.clone(), tok.access_token);
+            let client = ArmClient::with_token(http.clone(), tok.access_token).endpoint(cloud.arm);
             if let Ok(mut found) = client.list_subscriptions().await {
                 for sub in &mut found {
                     if sub.tenant_id.is_empty() {
@@ -92,20 +94,59 @@ pub async fn discover_all(
 pub struct ArmClient {
     http: reqwest::Client,
     token: String,
+    /// ARM endpoint for the active cloud (defaults to public ARM).
+    endpoint: String,
+    /// When true, the `wait_*`/`post_action` helpers return immediately instead of polling a
+    /// long-running operation to completion (az `--no-wait`).
+    no_wait: bool,
+    /// When true, trace each request to stderr (az `--debug`).
+    trace: bool,
 }
 
 impl ArmClient {
     /// Build a client bound to a specific bearer token. Tokens are tenant-scoped, so callers
     /// mint the right one per subscription (see [`crate::context::Context`]).
     pub fn with_token(http: reqwest::Client, token: String) -> Self {
-        Self { http, token }
+        Self {
+            http,
+            token,
+            endpoint: ARM_ENDPOINT.to_string(),
+            no_wait: false,
+            trace: false,
+        }
+    }
+
+    /// Target a specific cloud's ARM endpoint (e.g. `https://management.usgovcloudapi.net`).
+    pub fn endpoint(mut self, endpoint: &str) -> Self {
+        self.endpoint = endpoint.to_string();
+        self
+    }
+
+    /// Enable fire-and-forget mode: LRO helpers stop polling.
+    pub fn no_wait(mut self, no_wait: bool) -> Self {
+        self.no_wait = no_wait;
+        self
+    }
+
+    /// Enable request tracing to stderr.
+    pub fn trace(mut self, trace: bool) -> Self {
+        self.trace = trace;
+        self
+    }
+
+    /// Trace a request line when tracing is on.
+    fn log(&self, method: &str, url: &str) {
+        if self.trace {
+            eprintln!("raz: → {method} {url}");
+        }
     }
 
     /// GET an ARM resource path (everything after the endpoint host) at `api_version`,
     /// returning the parsed JSON body.
     pub async fn get(&self, path: &str, api_version: &str) -> Result<Value> {
         let sep = if path.contains('?') { '&' } else { '?' };
-        let url = format!("{ARM_ENDPOINT}{path}{sep}api-version={api_version}");
+        let url = format!("{}{path}{sep}api-version={api_version}", self.endpoint);
+        self.log("GET", &url);
         let resp = self.http.get(&url).bearer_auth(&self.token).send().await?;
 
         let status = resp.status();
@@ -121,7 +162,8 @@ impl ArmClient {
     /// response body. ARM creates/updates are long-running, so callers typically follow this
     /// with [`ArmClient::wait_provisioning`].
     pub async fn put(&self, path: &str, api_version: &str, body: &Value) -> Result<Value> {
-        let url = format!("{ARM_ENDPOINT}{path}?api-version={api_version}");
+        let url = format!("{}{path}?api-version={api_version}", self.endpoint);
+        self.log("PUT", &url);
         let resp = self
             .http
             .put(&url)
@@ -141,7 +183,8 @@ impl ArmClient {
     /// POST `path` (with an optional JSON body) and return the parsed response — for read-style
     /// POST APIs such as PolicyInsights `summarize`.
     pub async fn post(&self, path: &str, api_version: &str, body: Option<&Value>) -> Result<Value> {
-        let url = format!("{ARM_ENDPOINT}{path}?api-version={api_version}");
+        let url = format!("{}{path}?api-version={api_version}", self.endpoint);
+        self.log("POST", &url);
         let mut req = self.http.post(&url).bearer_auth(&self.token);
         req = match body {
             Some(b) => req.json(b),
@@ -160,7 +203,8 @@ impl ArmClient {
     /// DELETE the resource at `path`. ARM deletes are long-running (202 Accepted), so callers
     /// follow with [`ArmClient::wait_deleted`]. A 404 is treated as already-gone (success).
     pub async fn delete(&self, path: &str, api_version: &str) -> Result<()> {
-        let url = format!("{ARM_ENDPOINT}{path}?api-version={api_version}");
+        let url = format!("{}{path}?api-version={api_version}", self.endpoint);
+        self.log("DELETE", &url);
         let resp = self
             .http
             .delete(&url)
@@ -178,6 +222,9 @@ impl ArmClient {
     /// Poll a resource until its `properties.provisioningState` is terminal. Returns the final
     /// resource on `Succeeded`, errors on `Failed`/`Canceled` or timeout.
     pub async fn wait_provisioning(&self, path: &str, api_version: &str) -> Result<Value> {
+        if self.no_wait {
+            return self.get(path, api_version).await; // return the in-progress resource as-is
+        }
         for _ in 0..POLL_MAX_ATTEMPTS {
             let resource = self.get(path, api_version).await?;
             let state = resource
@@ -200,6 +247,9 @@ impl ArmClient {
 
     /// Poll until the resource at `path` no longer exists (delete completed).
     pub async fn wait_deleted(&self, path: &str, api_version: &str) -> Result<()> {
+        if self.no_wait {
+            return Ok(()); // deletion accepted; don't poll
+        }
         for _ in 0..POLL_MAX_ATTEMPTS {
             match self.get(path, api_version).await {
                 Err(RazError::NotFound(_)) => return Ok(()),
@@ -216,7 +266,7 @@ impl ArmClient {
     /// long-running: a 202 carries an `Azure-AsyncOperation` (or `Location`) header pointing at
     /// a status URL that we poll until terminal. A 2xx without a header is treated as done.
     pub async fn post_action(&self, path: &str, api_version: &str) -> Result<()> {
-        let url = format!("{ARM_ENDPOINT}{path}?api-version={api_version}");
+        let url = format!("{}{path}?api-version={api_version}", self.endpoint);
         let resp = self
             .http
             .post(&url)
@@ -228,6 +278,9 @@ impl ArmClient {
         if !status.is_success() {
             let body = resp.text().await.unwrap_or_default();
             return Err(map_status(status.as_u16(), path, body));
+        }
+        if self.no_wait {
+            return Ok(()); // action accepted; don't poll the operation
         }
         let op_url = resp
             .headers()
@@ -276,7 +329,7 @@ impl ArmClient {
         api_version: &str,
         body: &Value,
     ) -> Result<Value> {
-        let url = format!("{ARM_ENDPOINT}{path}?api-version={api_version}");
+        let url = format!("{}{path}?api-version={api_version}", self.endpoint);
         let resp = self
             .http
             .post(&url)
@@ -357,7 +410,10 @@ impl ArmClient {
         }
 
         // POST .../register (empty body — ARM requires an explicit zero Content-Length).
-        let url = format!("{ARM_ENDPOINT}{path}/register?api-version={RESOURCES_API}");
+        let url = format!(
+            "{}{path}/register?api-version={RESOURCES_API}",
+            self.endpoint
+        );
         let resp = self
             .http
             .post(&url)

@@ -28,4 +28,11 @@ raz-core = { workspace = true }
 tokio = { workspace = true }
 reqwest = { workspace = true }
 clap = { workspace = true }
+clap_complete = { workspace = true }
 serde_json = { workspace = true }
+base64 = { workspace = true }
+time = { workspace = true }
+
+[features]
+# Embed a GGUF model in the CLI (candle, in-process). The TUI stays endpoint-only.
+local-llm = ["raz-core/local-llm"]

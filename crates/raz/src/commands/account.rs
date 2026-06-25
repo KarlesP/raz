@@ -11,7 +11,9 @@ use raz_core::error::{usage, Result};
 use raz_core::output::TableSpec;
 use raz_core::{GlobalArgs, RazError};
 
-use super::emit;
+use raz_core::arm::subscription as sub_arm;
+
+use super::{arm_context, emit};
 
 #[derive(Subcommand)]
 pub enum AccountCommand {
@@ -29,6 +31,19 @@ pub enum AccountCommand {
     ListTenants,
     /// Print a bearer token (and expiry) for the active subscription's tenant, for scripting/CI.
     GetAccessToken,
+    /// List the Azure regions available to the active subscription.
+    ListLocations,
+    /// Inspect management groups.
+    ManagementGroup {
+        #[command(subcommand)]
+        command: ManagementGroupCommand,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum ManagementGroupCommand {
+    /// List management groups visible to the identity.
+    List,
 }
 
 fn subscription_table() -> TableSpec {
@@ -80,9 +95,10 @@ pub async fn run(command: AccountCommand, globals: GlobalArgs) -> Result<()> {
                 Some(refresh) => {
                     let tok = device_code::exchange_refresh_token(
                         &ctx.http,
+                        ctx.cloud().authority,
                         &tenant,
                         refresh,
-                        device_code::DEFAULT_SCOPE,
+                        &ctx.cloud().arm_scope(),
                     )
                     .await?;
                     (tok.access_token, now_unix() + tok.expires_in)
@@ -97,6 +113,30 @@ pub async fn run(command: AccountCommand, globals: GlobalArgs) -> Result<()> {
                 "tenant": tenant,
             });
             emit(&ctx, value, None)
+        }
+        AccountCommand::ListLocations => {
+            let (ctx, client, sub) = arm_context(globals).await?;
+            let value = sub_arm::list_locations(&client, &sub).await?;
+            emit(
+                &ctx,
+                value,
+                Some(&vec![
+                    ("Name", "name"),
+                    ("DisplayName", "displayName"),
+                    ("Regional", "regionalDisplayName"),
+                ]),
+            )
+        }
+        AccountCommand::ManagementGroup {
+            command: ManagementGroupCommand::List,
+        } => {
+            let (ctx, client, _sub) = arm_context(globals).await?;
+            let value = sub_arm::list_management_groups(&client).await?;
+            emit(
+                &ctx,
+                value,
+                Some(&vec![("Name", "name"), ("DisplayName", "displayName")]),
+            )
         }
     }
 }
