@@ -1,0 +1,157 @@
+name: Benchmark (template)
+
+# az vs raz, deploying the SAME ARM template (bench/infra.json): a hub-and-spoke topology with
+# multi-region VMs, an Application Gateway, NSGs, Key Vault and Storage. Times create + delete for
+# each tool, plus a rapid-ops micro-benchmark, and publishes report.md.
+#
+# Manual only — creates REAL, billable Azure resources (App Gateway + 2 VMs for the run's duration).
+# A final always() step deletes every resource group it touched.
+on:
+  workflow_dispatch:
+    inputs:
+      location:
+        description: Primary region
+        default: westeurope
+      location2:
+        description: Secondary region (multi-region VM)
+        default: northeurope
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    env:
+      RUN: ${{ github.run_id }}
+      LOC: ${{ inputs.location }}
+      LOC2: ${{ inputs.location2 }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install raz (v0.4.0 release binary)
+        run: |
+          curl -fsSL -o raz "https://github.com/KarlesP/raz/releases/download/v0.4.0/raz-linux-x86_64"
+          chmod +x raz && sudo mv raz /usr/local/bin/raz
+          raz --version
+
+      - name: Generate deployment parameters
+        run: |
+          PW="Bench-$(openssl rand -base64 24 | tr -dc 'A-Za-z0-9' | head -c 20)!"
+          echo "::add-mask::$PW"
+          cat > params.json <<JSON
+          {
+            "\$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+            "contentVersion": "1.0.0.0",
+            "parameters": {
+              "location":      { "value": "${LOC}" },
+              "location2":     { "value": "${LOC2}" },
+              "prefix":        { "value": "b${RUN}" },
+              "adminPassword": { "value": "${PW}" }
+            }
+          }
+          JSON
+
+      - name: Azure login (OIDC) for az
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: raz login (service principal, OIDC)
+        run: |
+          raz login --service-principal \
+            --client-id "${{ secrets.AZURE_CLIENT_ID }}" \
+            --tenant "${{ secrets.AZURE_TENANT_ID }}"
+
+      - name: Stage — az
+        id: az
+        run: |
+          RG="bench-az-${RUN}"
+          az group create -n "$RG" -l "$LOC" -o none
+          t0=$(date +%s)
+          az deployment group create -g "$RG" --template-file bench/infra.json --parameters params.json -o none
+          t1=$(date +%s)
+          count=$(az resource list -g "$RG" --query "length(@)" -o tsv)
+          t2=$(date +%s)
+          az group delete -n "$RG" --yes -o none
+          t3=$(date +%s)
+          { echo "create=$((t1-t0))"; echo "delete=$((t3-t2))"; echo "count=$count"; } >> "$GITHUB_OUTPUT"
+
+      - name: Stage — raz
+        id: raz
+        run: |
+          RG="bench-raz-${RUN}"
+          raz group create -n "$RG" -l "$LOC" -o none
+          t0=$(date +%s)
+          raz deployment group create -g "$RG" --template-file bench/infra.json --parameters params.json -o none
+          t1=$(date +%s)
+          # -o json for the scalar count (works on the v0.4.0 release binary).
+          count=$(raz resource list -g "$RG" --query "length(@)" -o json)
+          t2=$(date +%s)
+          raz group delete -n "$RG" --yes -o none
+          t3=$(date +%s)
+          { echo "create=$((t1-t0))"; echo "delete=$((t3-t2))"; echo "count=$count"; } >> "$GITHUB_OUTPUT"
+
+      - name: Rapid-ops micro-benchmark
+        id: micro
+        run: |
+          N=25
+          a0=$(date +%s)
+          for i in $(seq 1 $N); do az group create -n "mb-az-${RUN}-$i" -l "$LOC" -o none; done
+          for i in $(seq 1 $N); do az group delete -n "mb-az-${RUN}-$i" --yes --no-wait -o none; done
+          a1=$(date +%s)
+          r0=$(date +%s)
+          for i in $(seq 1 $N); do raz group create -n "mb-raz-${RUN}-$i" -l "$LOC" -o none; done
+          for i in $(seq 1 $N); do raz group delete -n "mb-raz-${RUN}-$i" --yes --no-wait -o none; done
+          r1=$(date +%s)
+          { echo "az=$((a1-a0))"; echo "raz=$((r1-r0))"; echo "n=$N"; } >> "$GITHUB_OUTPUT"
+
+      - name: Build report.md
+        if: always()
+        run: |
+          cat > report.md <<MD
+          # az vs raz — benchmark report (template)
+
+          - Run: \`${RUN}\` ($(date -u +%FT%TZ))
+          - Regions: ${LOC} + ${LOC2}
+          - Architecture: hub-and-spoke (3 VNets, peered) · 2 Linux VMs (multi-region) · Application Gateway (Standard_v2) · NSGs · Key Vault · Storage
+
+          ## Realistic architecture — deploy + delete (same ARM template)
+          | Tool | Resources created | Create time | Delete time |
+          |------|------------------:|------------:|------------:|
+          | az   | ${{ steps.az.outputs.count }}  | ${{ steps.az.outputs.create }}s  | ${{ steps.az.outputs.delete }}s  |
+          | raz  | ${{ steps.raz.outputs.count }} | ${{ steps.raz.outputs.create }}s | ${{ steps.raz.outputs.delete }}s |
+
+          > Architecture timings are dominated by Azure provisioning (the Application Gateway alone is
+          > ~10–15 min), so az and raz are expected to be roughly equal here.
+
+          ## Rapid-ops micro-benchmark — ${{ steps.micro.outputs.n }}× empty resource-group create + delete
+          | Tool | Total |
+          |------|------:|
+          | az   | ${{ steps.micro.outputs.az }}s  |
+          | raz  | ${{ steps.micro.outputs.raz }}s |
+
+          > Here the per-invocation CLI overhead dominates — this is where raz's near-zero startup
+          > (compiled Rust, no Python) shows.
+          MD
+          cat report.md
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-report-template
+          path: report.md
+
+      - name: Cleanup (always)
+        if: always()
+        run: |
+          az group delete -n "bench-az-${RUN}"  --yes --no-wait -o none 2>/dev/null || true
+          az group delete -n "bench-raz-${RUN}" --yes --no-wait -o none 2>/dev/null || true
+          for i in $(seq 1 25); do
+            az group delete -n "mb-az-${RUN}-$i"  --yes --no-wait -o none 2>/dev/null || true
+            az group delete -n "mb-raz-${RUN}-$i" --yes --no-wait -o none 2>/dev/null || true
+          done
