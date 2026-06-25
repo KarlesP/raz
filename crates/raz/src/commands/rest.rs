@@ -27,16 +27,17 @@ pub struct RestArgs {
 
 pub async fn run(args: RestArgs, globals: GlobalArgs) -> Result<()> {
     let ctx = Context::load(globals)?;
+    let cloud = ctx.cloud();
 
-    // ARM-relative paths resolve against the management endpoint.
+    // ARM-relative paths resolve against the active cloud's management endpoint.
     let url = if args.url.starts_with('/') {
-        format!("https://management.azure.com{}", args.url)
+        format!("{}{}", cloud.arm, args.url)
     } else {
         args.url.clone()
     };
 
     // Pick the token audience from the host: Graph vs ARM (default).
-    let token = if url.contains("graph.microsoft.com") {
+    let token = if url.contains(cloud.graph.trim_start_matches("https://")) {
         ctx.graph_token().await?
     } else {
         ctx.subscription_and_token().await?.1

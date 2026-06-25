@@ -13,22 +13,12 @@ use crate::error::{RazError, Result};
 /// registering an application (same value az itself uses).
 pub const CLIENT_ID: &str = "04b07795-8ddb-461a-bbee-02f9e1bf7b46";
 
-/// Default scope: ARM management + the refresh-token/openid scopes.
-pub const DEFAULT_SCOPE: &str =
-    "https://management.azure.com/.default offline_access openid profile";
-
-/// Microsoft Graph scope, for app/federated-credential management (`raz ad ...`).
-pub const GRAPH_SCOPE: &str = "https://graph.microsoft.com/.default offline_access openid profile";
-
-/// Key Vault data-plane scope, for secret get/set (`raz keyvault secret ...`).
-pub const KEYVAULT_SCOPE: &str = "https://vault.azure.net/.default offline_access openid profile";
-
-fn devicecode_url(tenant: &str) -> String {
-    format!("https://login.microsoftonline.com/{tenant}/oauth2/v2.0/devicecode")
+fn devicecode_url(authority: &str, tenant: &str) -> String {
+    format!("{authority}/{tenant}/oauth2/v2.0/devicecode")
 }
 
-pub(crate) fn token_url(tenant: &str) -> String {
-    format!("https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token")
+pub(crate) fn token_url(authority: &str, tenant: &str) -> String {
+    format!("{authority}/{tenant}/oauth2/v2.0/token")
 }
 
 /// Response from the devicecode endpoint. `message` already contains user-facing
@@ -95,11 +85,13 @@ pub enum PollOutcome {
 /// default multi-tenant authority).
 pub async fn request_device_code(
     http: &reqwest::Client,
+    authority: &str,
     tenant: &str,
+    scope: &str,
 ) -> Result<DeviceCodeResponse> {
     let resp = http
-        .post(devicecode_url(tenant))
-        .form(&[("client_id", CLIENT_ID), ("scope", DEFAULT_SCOPE)])
+        .post(devicecode_url(authority, tenant))
+        .form(&[("client_id", CLIENT_ID), ("scope", scope)])
         .send()
         .await?;
     if !resp.status().is_success() {
@@ -114,11 +106,12 @@ pub async fn request_device_code(
 /// Step 2 (single attempt): poll the token endpoint once.
 pub async fn poll_token_once(
     http: &reqwest::Client,
+    authority: &str,
     tenant: &str,
     device_code: &str,
 ) -> Result<PollOutcome> {
     let resp = http
-        .post(token_url(tenant))
+        .post(token_url(authority, tenant))
         .form(&[
             ("grant_type", "urn:ietf:params:oauth:grant-type:device_code"),
             ("client_id", CLIENT_ID),
@@ -152,12 +145,13 @@ pub async fn poll_token_once(
 /// token. `scope` selects the audience (ARM vs Microsoft Graph).
 pub async fn exchange_refresh_token(
     http: &reqwest::Client,
+    authority: &str,
     tenant: &str,
     refresh_token: &str,
     scope: &str,
 ) -> Result<TokenResponse> {
     let resp = http
-        .post(token_url(tenant))
+        .post(token_url(authority, tenant))
         .form(&[
             ("grant_type", "refresh_token"),
             ("client_id", CLIENT_ID),
@@ -180,16 +174,18 @@ pub async fn exchange_refresh_token(
 /// the user the URL/code (CLI prints it; TUI renders a panel).
 pub async fn run_flow(
     http: &reqwest::Client,
+    authority: &str,
     tenant: &str,
+    scope: &str,
     on_prompt: impl FnOnce(&DeviceCodeResponse),
 ) -> Result<TokenResponse> {
-    let dc = request_device_code(http, tenant).await?;
+    let dc = request_device_code(http, authority, tenant, scope).await?;
     on_prompt(&dc);
 
     let mut interval = dc.interval.max(1);
     loop {
         tokio::time::sleep(Duration::from_secs(interval)).await;
-        match poll_token_once(http, tenant, &dc.device_code).await? {
+        match poll_token_once(http, authority, tenant, &dc.device_code).await? {
             PollOutcome::Pending => {}
             PollOutcome::SlowDown => interval += 5,
             PollOutcome::Granted(token) => return Ok(*token),
@@ -204,10 +200,11 @@ mod tests {
     #[test]
     fn authority_urls_include_tenant() {
         assert_eq!(
-            devicecode_url("organizations"),
+            devicecode_url("https://login.microsoftonline.com", "organizations"),
             "https://login.microsoftonline.com/organizations/oauth2/v2.0/devicecode"
         );
-        assert!(token_url("common").ends_with("/common/oauth2/v2.0/token"));
+        assert!(token_url("https://login.microsoftonline.com", "common")
+            .ends_with("/common/oauth2/v2.0/token"));
     }
 
     #[test]

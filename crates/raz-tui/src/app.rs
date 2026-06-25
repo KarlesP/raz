@@ -218,10 +218,13 @@ impl App {
             .tenant_id
             .clone()
             .unwrap_or_else(|| "organizations".to_string());
-        match self
-            .rt
-            .block_on(device_code::request_device_code(&self.http, &tenant))
-        {
+        let cloud = self.cloud();
+        match self.rt.block_on(device_code::request_device_code(
+            &self.http,
+            cloud.authority,
+            &tenant,
+            &cloud.arm_scope(),
+        )) {
             Ok(device) => {
                 device_code::open_verification(&device);
                 let interval = device.interval.max(1);
@@ -272,7 +275,7 @@ impl App {
                 return;
             }
         };
-        let client = ArmClient::with_token(self.http.clone(), token);
+        let client = ArmClient::with_token(self.http.clone(), token).endpoint(self.cloud().arm);
 
         self.vms = self
             .rt
@@ -301,17 +304,24 @@ impl App {
             .and_then(|i| self.profile.subscriptions.get(i))
     }
 
+    /// The active Azure cloud (`raz cloud set`), defaulting to public.
+    fn cloud(&self) -> &'static raz_core::cloud::Cloud {
+        raz_core::cloud::resolve(self.profile.cloud.as_deref())
+    }
+
     /// Mint an ARM token for `tenant` from the stored refresh token, falling back to the
     /// cached access token. Mirrors `Context::token_for_tenant` for the TUI's sync loop.
     fn token_for_tenant(&self, tenant: &str) -> Option<String> {
         let cached = self.profile.token.as_ref()?;
         if !tenant.is_empty() {
             if let Some(refresh) = &cached.refresh_token {
+                let cloud = self.cloud();
                 if let Ok(tok) = self.rt.block_on(device_code::exchange_refresh_token(
                     &self.http,
+                    cloud.authority,
                     tenant,
                     refresh,
-                    device_code::DEFAULT_SCOPE,
+                    &cloud.arm_scope(),
                 )) {
                     return Some(tok.access_token);
                 }
@@ -628,6 +638,7 @@ impl App {
         if !matches!(self.view, View::Login) {
             return;
         }
+        let cloud = self.cloud();
         let Some(login) = self.login.as_mut() else {
             return;
         };
@@ -643,6 +654,7 @@ impl App {
         let device_code = login.device.device_code.clone();
         let outcome = self.rt.block_on(device_code::poll_token_once(
             &self.http,
+            cloud.authority,
             &tenant,
             &device_code,
         ));
@@ -670,7 +682,8 @@ impl App {
         let _ = self.profile.save();
 
         // Cross-tenant discovery, same as the CLI's `raz login`.
-        if let Ok((_tenants, subs)) = self.rt.block_on(discover_all(&self.http, &token)) {
+        let cloud = self.cloud();
+        if let Ok((_tenants, subs)) = self.rt.block_on(discover_all(&self.http, cloud, &token)) {
             self.profile.subscriptions = subs;
             let _ = self.profile.save();
             if !self.profile.subscriptions.is_empty() {

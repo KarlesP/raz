@@ -56,13 +56,17 @@ pub struct LoginArgs {
 pub async fn run(args: LoginArgs, _globals: &GlobalArgs) -> Result<()> {
     let http = new_http_client();
     let mut profile = Profile::load()?;
+    let cloud = raz_core::cloud::resolve(profile.cloud.as_deref());
+    if cloud.name != "AzureCloud" {
+        println!("Cloud: {}", cloud.name);
+    }
 
     let (tenant, token) = if args.identity {
-        identity_login(&http, &args).await?
+        identity_login(&http, cloud, &args).await?
     } else if args.service_principal {
-        service_principal_login(&http, &args).await?
+        service_principal_login(&http, cloud, &args).await?
     } else {
-        device_code_login(&http, &profile, &args).await?
+        device_code_login(&http, cloud, &profile, &args).await?
     };
 
     // Persist the token first so it can be reused for discovery and later commands.
@@ -72,7 +76,7 @@ pub async fn run(args: LoginArgs, _globals: &GlobalArgs) -> Result<()> {
 
     // Enumerate the tenants/subscriptions the identity can reach. With a refresh token this is
     // cross-tenant; a service-principal token has none, so it degrades to its single tenant.
-    let (tenants, subs) = discover_all(&http, &token).await?;
+    let (tenants, subs) = discover_all(&http, cloud, &token).await?;
 
     if !tenants.is_empty() {
         println!("\nAvailable tenants ({}):", tenants.len());
@@ -108,6 +112,7 @@ pub async fn run(args: LoginArgs, _globals: &GlobalArgs) -> Result<()> {
 /// used, else the multi-tenant authority.
 async fn device_code_login(
     http: &reqwest::Client,
+    cloud: &raz_core::cloud::Cloud,
     profile: &Profile,
     args: &LoginArgs,
 ) -> Result<(String, TokenResponse)> {
@@ -118,7 +123,7 @@ async fn device_code_login(
         .unwrap_or_else(|| "organizations".to_string());
     println!("Signing in to tenant: {tenant}");
 
-    let token = device_code::run_flow(http, &tenant, |dc| {
+    let token = device_code::run_flow(http, cloud.authority, &tenant, &cloud.arm_scope(), |dc| {
         println!("{}", dc.message);
         device_code::open_verification(dc);
     })
@@ -130,12 +135,14 @@ async fn device_code_login(
 /// directly. `--client-id` selects a user-assigned identity.
 async fn identity_login(
     http: &reqwest::Client,
+    cloud: &raz_core::cloud::Cloud,
     args: &LoginArgs,
 ) -> Result<(String, TokenResponse)> {
     use raz_core::auth::managed_identity;
     println!("Signing in with managed identity…");
     let token = managed_identity::acquire(
         http,
+        &cloud.arm_resource(),
         args.client_id.as_deref(),
         args.object_id.as_deref(),
         args.resource_id.as_deref(),
@@ -154,6 +161,7 @@ async fn identity_login(
 /// federated token (`--federated-token`, or fetched from the GitHub Actions OIDC provider).
 async fn service_principal_login(
     http: &reqwest::Client,
+    cloud: &raz_core::cloud::Cloud,
     args: &LoginArgs,
 ) -> Result<(String, TokenResponse)> {
     let client_id = args
@@ -167,7 +175,15 @@ async fn service_principal_login(
 
     let token = if let Some(secret) = &args.client_secret {
         println!("Signing in as service principal {client_id} (client secret) to {tenant}");
-        sp::acquire_client_secret(http, &tenant, &client_id, secret).await?
+        sp::acquire_client_secret(
+            http,
+            cloud.authority,
+            cloud.arm,
+            &tenant,
+            &client_id,
+            secret,
+        )
+        .await?
     } else {
         let assertion = match &args.federated_token {
             Some(t) => t.clone(),
@@ -177,7 +193,15 @@ async fn service_principal_login(
             }
         };
         println!("Signing in as service principal {client_id} (federated token) to {tenant}");
-        sp::acquire_federated(http, &tenant, &client_id, &assertion).await?
+        sp::acquire_federated(
+            http,
+            cloud.authority,
+            cloud.arm,
+            &tenant,
+            &client_id,
+            &assertion,
+        )
+        .await?
     };
     Ok((tenant, token))
 }

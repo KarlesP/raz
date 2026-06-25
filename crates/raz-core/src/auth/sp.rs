@@ -8,27 +8,27 @@ use serde::Deserialize;
 use super::device_code::{token_url, TokenResponse};
 use crate::error::{RazError, Result};
 
-/// ARM scope for client-credentials tokens. Unlike the delegated device-code scope, the
-/// client-credentials grant takes only the `.default` resource scope (no openid/offline_access).
-const ARM_DEFAULT_SCOPE: &str = "https://management.azure.com/.default";
-
 /// OIDC client-assertion type for the federated-token grant.
 const JWT_BEARER: &str = "urn:ietf:params:oauth:client-assertion-type:jwt-bearer";
 
-/// Sign in as a service principal using a client secret.
+/// Sign in as a service principal using a client secret. `authority` and `arm` are the active
+/// cloud's AAD authority and ARM endpoint (the client-credentials scope is `{arm}/.default`).
 pub async fn acquire_client_secret(
     http: &reqwest::Client,
+    authority: &str,
+    arm: &str,
     tenant: &str,
     client_id: &str,
     client_secret: &str,
 ) -> Result<TokenResponse> {
+    let scope = format!("{arm}/.default");
     let form = [
         ("grant_type", "client_credentials"),
         ("client_id", client_id),
         ("client_secret", client_secret),
-        ("scope", ARM_DEFAULT_SCOPE),
+        ("scope", scope.as_str()),
     ];
-    post_token(http, tenant, &form).await
+    post_token(http, authority, tenant, &form).await
 }
 
 /// Sign in as a service principal using an OIDC federated token (`client_assertion`). No secret
@@ -37,26 +37,34 @@ pub async fn acquire_client_secret(
 /// app registration.
 pub async fn acquire_federated(
     http: &reqwest::Client,
+    authority: &str,
+    arm: &str,
     tenant: &str,
     client_id: &str,
     assertion: &str,
 ) -> Result<TokenResponse> {
+    let scope = format!("{arm}/.default");
     let form = [
         ("grant_type", "client_credentials"),
         ("client_id", client_id),
         ("client_assertion_type", JWT_BEARER),
         ("client_assertion", assertion),
-        ("scope", ARM_DEFAULT_SCOPE),
+        ("scope", scope.as_str()),
     ];
-    post_token(http, tenant, &form).await
+    post_token(http, authority, tenant, &form).await
 }
 
 async fn post_token(
     http: &reqwest::Client,
+    authority: &str,
     tenant: &str,
     form: &[(&str, &str)],
 ) -> Result<TokenResponse> {
-    let resp = http.post(token_url(tenant)).form(form).send().await?;
+    let resp = http
+        .post(token_url(authority, tenant))
+        .form(form)
+        .send()
+        .await?;
     if !resp.status().is_success() {
         let body = resp.text().await.unwrap_or_default();
         return Err(RazError::Auth(format!(

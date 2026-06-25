@@ -19,7 +19,6 @@ use super::now_unix;
 use crate::error::{RazError, Result};
 
 const IMDS_TOKEN_URL: &str = "http://169.254.169.254/metadata/identity/oauth2/token";
-const ARM_RESOURCE: &str = "https://management.azure.com/";
 
 #[derive(Deserialize)]
 struct ImdsToken {
@@ -69,6 +68,7 @@ fn id_query(
 /// Acquire an ARM token from the detected managed-identity endpoint.
 pub async fn acquire(
     http: &reqwest::Client,
+    arm_resource: &str,
     client_id: Option<&str>,
     object_id: Option<&str>,
     resource_id: Option<&str>,
@@ -76,7 +76,7 @@ pub async fn acquire(
     let (url, api_version, headers) = endpoint();
     let mut query = vec![
         ("api-version", api_version.to_string()),
-        ("resource", ARM_RESOURCE.to_string()),
+        ("resource", arm_resource.to_string()),
     ];
     query.extend(id_query(client_id, object_id, resource_id));
 

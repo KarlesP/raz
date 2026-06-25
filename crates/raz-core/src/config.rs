@@ -57,6 +57,9 @@ pub struct Profile {
     pub token: Option<CachedToken>,
     #[serde(default)]
     pub defaults: Defaults,
+    /// Active Azure cloud name (`raz cloud set`); None means AzureCloud (public).
+    #[serde(default)]
+    pub cloud: Option<String>,
 }
 
 impl Profile {
@@ -142,6 +145,7 @@ mod tests {
                 expires_on: 42,
             }),
             defaults: Default::default(),
+            cloud: None,
         };
         let json = serde_json::to_string(&p).unwrap();
         let back: Profile = serde_json::from_str(&json).unwrap();

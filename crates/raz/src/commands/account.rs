@@ -95,9 +95,10 @@ pub async fn run(command: AccountCommand, globals: GlobalArgs) -> Result<()> {
                 Some(refresh) => {
                     let tok = device_code::exchange_refresh_token(
                         &ctx.http,
+                        ctx.cloud().authority,
                         &tenant,
                         refresh,
-                        device_code::DEFAULT_SCOPE,
+                        &ctx.cloud().arm_scope(),
                     )
                     .await?;
                     (tok.access_token, now_unix() + tok.expires_in)
