@@ -36,17 +36,6 @@ fn str_at<'a>(v: &'a Value, key: &str) -> &'a str {
     v.get(key).and_then(Value::as_str).unwrap_or("")
 }
 
-/// Resource group from an ARM id (`…/resourceGroups/<rg>/…`), case-insensitive.
-fn rg_from_id(id: &str) -> String {
-    let parts: Vec<&str> = id.split('/').collect();
-    parts
-        .iter()
-        .position(|p| p.eq_ignore_ascii_case("resourceGroups"))
-        .and_then(|i| parts.get(i + 1))
-        .map(|s| s.to_string())
-        .unwrap_or_default()
-}
-
 /// Build the topology from the resource list plus optional vnet/nic details (full ARM resources).
 pub fn build(subscription: &str, resources: &Value, vnets: &[Value], nics: &[Value]) -> Topology {
     let mut nodes: Vec<Node> = Vec::new();
@@ -74,7 +63,7 @@ pub fn build(subscription: &str, resources: &Value, vnets: &[Value], nics: &[Val
             let rg = {
                 let g = str_at(r, "resourceGroup");
                 if g.is_empty() {
-                    rg_from_id(&id)
+                    crate::arm::resource_group_from_id(&id).unwrap_or_default()
                 } else {
                     g.to_string()
                 }
@@ -101,7 +90,7 @@ pub fn build(subscription: &str, resources: &Value, vnets: &[Value], nics: &[Val
         let vrg = {
             let g = str_at(v, "resourceGroup");
             if g.is_empty() {
-                rg_from_id(&vid)
+                crate::arm::resource_group_from_id(&vid).unwrap_or_default()
             } else {
                 g.to_string()
             }
