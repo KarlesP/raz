@@ -48,13 +48,17 @@ pub fn render(value: &Value, format: OutputFormat, table: Option<&TableSpec>) ->
         OutputFormat::Json => Ok(serde_json::to_string_pretty(value)?),
         OutputFormat::Yaml => serde_yaml::to_string(value)
             .map_err(|e| crate::error::RazError::Other(format!("yaml: {e}"))),
+        // A `--query` can project the result down to a scalar (or array of scalars) even when the
+        // command supplies a table spec; in that case render the value directly, like az, instead
+        // of mapping the spec's columns onto a non-object (which yields blank cells).
         OutputFormat::Table => match table {
-            Some(spec) => Ok(render_table(value, spec)),
+            Some(spec) if is_tabular(value) => Ok(render_table(value, spec)),
+            Some(_) => Ok(tsv_value(value)),
             None => Ok(serde_json::to_string_pretty(value)?),
         },
         OutputFormat::Tsv => match table {
-            Some(spec) => Ok(render_tsv(value, spec)),
-            None => Ok(tsv_scalar(value)),
+            Some(spec) if is_tabular(value) => Ok(render_tsv(value, spec)),
+            _ => Ok(tsv_value(value)),
         },
         OutputFormat::None => Ok(String::new()),
     }
@@ -107,6 +111,23 @@ fn tsv_scalar(value: &Value) -> String {
     }
 }
 
+/// True when `value` is an object or an array of objects — the shape a `TableSpec` projects.
+fn is_tabular(value: &Value) -> bool {
+    match value {
+        Value::Object(_) => true,
+        Value::Array(items) => items.first().map(Value::is_object).unwrap_or(false),
+        _ => false,
+    }
+}
+
+/// Render a non-tabular value: a scalar on one line, or an array of scalars one per line.
+fn tsv_value(value: &Value) -> String {
+    match value {
+        Value::Array(items) => items.iter().map(tsv_scalar).collect::<Vec<_>>().join("\n"),
+        other => tsv_scalar(other),
+    }
+}
+
 /// Apply a JMESPath `--query` to the result, like az. Supports the full JMESPath grammar
 /// (projections, filters, functions, pipes). An empty query returns the value unchanged; an
 /// invalid expression or no match yields JSON null.
@@ -146,6 +167,23 @@ mod tests {
         let v = json!({"name": "vm1"});
         let out = render(&v, OutputFormat::Json, None).unwrap();
         assert!(out.contains("\"name\": \"vm1\""));
+    }
+
+    #[test]
+    fn tsv_renders_scalar_query_result() {
+        // A `--query` projecting to a scalar, with a table spec present, prints the value (az parity).
+        assert_eq!(
+            render(&json!("b573"), OutputFormat::Tsv, Some(&spec())).unwrap(),
+            "b573"
+        );
+        assert_eq!(
+            render(&json!(3), OutputFormat::Tsv, Some(&spec())).unwrap(),
+            "3"
+        );
+        assert_eq!(
+            render(&json!(["a", "b"]), OutputFormat::Tsv, Some(&spec())).unwrap(),
+            "a\nb"
+        );
     }
 
     #[test]
