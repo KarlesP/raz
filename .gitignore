@@ -14,3 +14,8 @@
 # Local working docs (roadmap / scratch) — not shipped.
 FEATURES.md
 draft-tasks.txt
+
+# Local LLM model files — never committed (multi-GB; user-supplied).
+/models/
+*.gguf
+*.crdownload

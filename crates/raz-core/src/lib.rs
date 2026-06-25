@@ -5,6 +5,7 @@
 //! json/table/tsv, [`auth`] runs the device-code login, [`arm`] is the ARM REST client plus
 //! the group/vnet/vm operations, and [`error`] maps failures to az-compatible exit codes.
 
+pub mod advisor;
 pub mod arm;
 pub mod auth;
 pub mod cloud;
@@ -12,6 +13,7 @@ pub mod config;
 pub mod context;
 pub mod error;
 pub mod graph;
+pub mod llm;
 mod odata;
 pub mod output;
 pub mod suggest;
