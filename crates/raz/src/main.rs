@@ -44,6 +44,14 @@ struct GlobalOpts {
     /// Don't wait for long-running operations to finish (az `--no-wait`).
     #[arg(long, global = true)]
     no_wait: bool,
+
+    /// Trace HTTP requests to stderr.
+    #[arg(long, global = true)]
+    debug: bool,
+
+    /// Alias for --debug.
+    #[arg(long, global = true)]
+    verbose: bool,
 }
 
 impl GlobalOpts {
@@ -58,6 +66,7 @@ impl GlobalOpts {
             output,
             query: self.query.clone(),
             no_wait: self.no_wait,
+            debug: self.debug || self.verbose,
         })
     }
 }
@@ -184,6 +193,16 @@ enum TopCommand {
     Configure(commands::configure::ConfigureArgs),
     /// Wait until a resource reaches a state (created / deleted / exists / custom).
     Wait(commands::wait::WaitArgs),
+    /// View or set the active Azure cloud (public / Gov / China).
+    Cloud {
+        #[command(subcommand)]
+        command: commands::cloud::CloudCommand,
+    },
+    /// Manage raz extensions (not available yet — see the roadmap).
+    Extension {
+        #[command(subcommand)]
+        command: commands::extension::ExtensionCommand,
+    },
 }
 
 #[tokio::main]
@@ -237,5 +256,7 @@ async fn run(cli: Cli) -> Result<(), RazError> {
         TopCommand::Completion { shell } => commands::completion::run(shell),
         TopCommand::Configure(args) => commands::configure::run(args, globals),
         TopCommand::Wait(args) => commands::wait::run(args, globals).await,
+        TopCommand::Cloud { command } => commands::cloud::run(command, globals),
+        TopCommand::Extension { command } => commands::extension::run(command),
     }
 }
