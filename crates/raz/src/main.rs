@@ -205,6 +205,8 @@ enum TopCommand {
     },
     /// Analyze the active subscription's architecture (naming, tags, governance) + guardrails.
     Advise(commands::advise::AdviseArgs),
+    /// Emit a Mermaid topology diagram of the subscription / resource group.
+    Diagram(commands::diagram::DiagramArgs),
 }
 
 #[tokio::main]
@@ -261,5 +263,6 @@ async fn run(cli: Cli) -> Result<(), RazError> {
         TopCommand::Cloud { command } => commands::cloud::run(command, globals),
         TopCommand::Extension { command } => commands::extension::run(command),
         TopCommand::Advise(args) => commands::advise::run(args, globals).await,
+        TopCommand::Diagram(args) => commands::diagram::run(args, globals).await,
     }
 }

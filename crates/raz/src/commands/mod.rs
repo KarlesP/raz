@@ -11,6 +11,7 @@ pub mod cloud;
 pub mod completion;
 pub mod configure;
 pub mod deployment;
+pub mod diagram;
 pub mod extension;
 pub mod group;
 pub mod keyvault;
