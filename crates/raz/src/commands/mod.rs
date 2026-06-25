@@ -3,6 +3,7 @@
 
 pub mod account;
 pub mod ad;
+pub mod advise;
 pub mod aks;
 pub mod appservice;
 pub mod budget;

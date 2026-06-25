@@ -203,6 +203,8 @@ enum TopCommand {
         #[command(subcommand)]
         command: commands::extension::ExtensionCommand,
     },
+    /// Analyze the active subscription's architecture (naming, tags, governance) + guardrails.
+    Advise(commands::advise::AdviseArgs),
 }
 
 #[tokio::main]
@@ -258,5 +260,6 @@ async fn run(cli: Cli) -> Result<(), RazError> {
         TopCommand::Wait(args) => commands::wait::run(args, globals).await,
         TopCommand::Cloud { command } => commands::cloud::run(command, globals),
         TopCommand::Extension { command } => commands::extension::run(command),
+        TopCommand::Advise(args) => commands::advise::run(args, globals).await,
     }
 }
