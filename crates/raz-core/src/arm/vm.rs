@@ -31,8 +31,9 @@ fn skus_filter_path(subscription: &str, location: &str) -> String {
     )
 }
 
-/// Inputs for [`create`]. Network resources default to `<vm>-vnet` / `default` subnet and are
-/// created if absent. Exactly one of `ssh_key` / `admin_password` must be provided.
+/// Inputs for [`create`], mirroring `az vm create`'s networking: the VNet/subnet are reused if
+/// they already exist and created otherwise; a public IP and NSG are created and attached unless
+/// opted out (`public_ip`/`nsg` = `None`). Exactly one of `ssh_key` / `admin_password` is required.
 pub struct VmCreate<'a> {
     pub subscription: &'a str,
     pub resource_group: &'a str,
@@ -42,6 +43,24 @@ pub struct VmCreate<'a> {
     pub admin_username: &'a str,
     pub ssh_key: Option<&'a str>,
     pub admin_password: Option<&'a str>,
+    /// VNet to use or create (defaults to `<vm>-vnet` at the command layer).
+    pub vnet_name: &'a str,
+    /// Subnet within `vnet_name` to use or create (defaults to `default`).
+    pub subnet_name: &'a str,
+    /// Public IP name to create and attach, or `None` to skip (az `--public-ip-address ""`).
+    pub public_ip: Option<&'a str>,
+    /// NSG name to create and attach to the NIC, or `None` to skip (az `--nsg ""`).
+    pub nsg: Option<&'a str>,
+}
+
+/// az-style optional resource: no flag → create with `default` name; explicit `""` → skip; else
+/// use the given name. Used to resolve `--public-ip-address` / `--nsg`.
+pub fn optional_resource_name(flag: Option<&str>, default: &str) -> Option<String> {
+    match flag {
+        Some("") => None,
+        Some(name) => Some(name.to_string()),
+        None => Some(default.to_string()),
+    }
 }
 
 /// `raz vm list` — all virtual machines in the subscription.
@@ -100,17 +119,22 @@ pub async fn create(client: &ArmClient, args: &VmCreate<'_>) -> Result<Value> {
         .ensure_resource_group(subscription, resource_group, location)
         .await?;
 
-    // 2. Virtual network + subnet (create the convenience network if it does not exist yet).
-    let vnet_name = format!("{name}-vnet");
-    let subnet_name = "default";
+    // 2. Virtual network + subnet: reuse if present (lets the VM join an existing/spoke subnet),
+    // else create the convenience network — matching `az vm create --vnet-name/--subnet`.
+    let vnet_name = args.vnet_name;
+    let subnet_name = args.subnet_name;
+    let net = |kind: &str, n: &str| {
+        format!("/subscriptions/{subscription}/resourceGroups/{resource_group}/providers/Microsoft.Network/{kind}/{n}")
+    };
     let subnet_path = format!(
-        "/subscriptions/{subscription}/resourceGroups/{resource_group}/providers/Microsoft.Network/virtualNetworks/{vnet_name}/subnets/{subnet_name}"
+        "{}/subnets/{subnet_name}",
+        net("virtualNetworks", vnet_name)
     );
     let subnet_id = match client.get(&subnet_path, NETWORK_API).await {
         Ok(subnet) => subnet
             .get("id")
             .and_then(Value::as_str)
-            .unwrap_or_default()
+            .unwrap_or(&subnet_path)
             .to_string(),
         Err(RazError::NotFound(_)) => {
             super::vnet::create(
@@ -118,7 +142,7 @@ pub async fn create(client: &ArmClient, args: &VmCreate<'_>) -> Result<Value> {
                 &super::vnet::VnetCreate {
                     subscription,
                     resource_group,
-                    name: &vnet_name,
+                    name: vnet_name,
                     location,
                     address_prefix: "10.0.0.0/16",
                     subnet_name,
@@ -126,31 +150,66 @@ pub async fn create(client: &ArmClient, args: &VmCreate<'_>) -> Result<Value> {
                 },
             )
             .await?;
-            // Subnet id is deterministic once the vnet exists.
-            format!(
-                "/subscriptions/{subscription}/resourceGroups/{resource_group}/providers/Microsoft.Network/virtualNetworks/{vnet_name}/subnets/{subnet_name}"
-            )
+            subnet_path.clone() // deterministic once the vnet exists
         }
         Err(e) => return Err(e),
     };
 
-    // 3. NIC.
-    let nic_name = format!("{name}-nic");
-    let nic_path = format!(
-        "/subscriptions/{subscription}/resourceGroups/{resource_group}/providers/Microsoft.Network/networkInterfaces/{nic_name}"
-    );
-    let nic_body = json!({
-        "location": location,
-        "properties": {
-            "ipConfigurations": [{
-                "name": "ipconfig1",
-                "properties": {
-                    "subnet": { "id": subnet_id },
-                    "privateIPAllocationMethod": "Dynamic"
-                }
-            }]
+    // 2b. Optional NSG (az creates one by default; `--nsg ""` → None skips it).
+    let nsg_id = match args.nsg {
+        Some(nsg_name) => {
+            let path = net("networkSecurityGroups", nsg_name);
+            let body = json!({ "location": location, "properties": {} });
+            client.put(&path, NETWORK_API, &body).await?;
+            let r = client.wait_provisioning(&path, NETWORK_API).await?;
+            Some(
+                r.get("id")
+                    .and_then(Value::as_str)
+                    .unwrap_or(&path)
+                    .to_string(),
+            )
         }
+        None => None,
+    };
+
+    // 2c. Optional public IP (az creates one by default; `--public-ip-address ""` → None skips it).
+    let pip_id = match args.public_ip {
+        Some(pip_name) => {
+            let path = net("publicIPAddresses", pip_name);
+            let body = json!({
+                "location": location,
+                "sku": { "name": "Standard" },
+                "properties": { "publicIPAllocationMethod": "Static" }
+            });
+            client.put(&path, NETWORK_API, &body).await?;
+            let r = client.wait_provisioning(&path, NETWORK_API).await?;
+            Some(
+                r.get("id")
+                    .and_then(Value::as_str)
+                    .unwrap_or(&path)
+                    .to_string(),
+            )
+        }
+        None => None,
+    };
+
+    // 3. NIC — subnet, plus the public IP / NSG when requested.
+    let nic_name = format!("{name}-nic");
+    let nic_path = net("networkInterfaces", &nic_name);
+    let mut ipconfig = json!({
+        "subnet": { "id": subnet_id },
+        "privateIPAllocationMethod": "Dynamic"
     });
+    if let Some(pid) = &pip_id {
+        ipconfig["publicIPAddress"] = json!({ "id": pid });
+    }
+    let mut nic_props = json!({
+        "ipConfigurations": [{ "name": "ipconfig1", "properties": ipconfig }]
+    });
+    if let Some(nid) = &nsg_id {
+        nic_props["networkSecurityGroup"] = json!({ "id": nid });
+    }
+    let nic_body = json!({ "location": location, "properties": nic_props });
     client.put(&nic_path, NETWORK_API, &nic_body).await?;
     let nic = client.wait_provisioning(&nic_path, NETWORK_API).await?;
     let nic_id = nic
@@ -390,4 +449,22 @@ pub async fn list_sizes(client: &ArmClient, subscription: &str, location: &str) 
         }));
     }
     Ok(Value::Array(sizes))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::optional_resource_name;
+
+    #[test]
+    fn optional_resource_name_az_semantics() {
+        assert_eq!(
+            optional_resource_name(None, "vm-pip"),
+            Some("vm-pip".into())
+        );
+        assert_eq!(optional_resource_name(Some(""), "vm-pip"), None); // az --public-ip-address ""
+        assert_eq!(
+            optional_resource_name(Some("mypip"), "vm-pip"),
+            Some("mypip".into())
+        );
+    }
 }
