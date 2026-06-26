@@ -1,0 +1,198 @@
+name: Benchmark (native)
+
+# az vs raz building the architecture with DISCRETE per-command calls (no ARM template). az uses its
+# native `network`/`vm`/... verbs; raz uses native where it has them (group, vnet, vm, storage,
+# keyvault) and `raz rest -m PUT` for what it lacks natively (NSG, peering, public IP, Application
+# Gateway). Times create + delete per tool, plus a rapid-ops micro-benchmark, and publishes report.md.
+#
+# Manual only — REAL billable resources (App Gateway + 2 VMs). A final always() step tears everything down.
+#
+# Note: `raz vm create` self-provisions its own VNet/NIC (no subnet targeting), so the raz VMs are
+# standalone (multi-region) rather than wired into the spokes — reported honestly. The az VMs use
+# --nsg "" --public-ip-address "" to stay minimal.
+on:
+  workflow_dispatch:
+    inputs:
+      location:
+        description: Primary region
+        default: westeurope
+      location2:
+        description: Secondary region (multi-region VM)
+        default: northeurope
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    env:
+      RUN: ${{ github.run_id }}
+      LOC: ${{ inputs.location }}
+      LOC2: ${{ inputs.location2 }}
+      APIV: "2023-09-01"
+    steps:
+      - name: Install raz (v0.4.0 release binary)
+        run: |
+          curl -fsSL -o raz "https://github.com/KarlesP/raz/releases/download/v0.4.0/raz-linux-x86_64"
+          chmod +x raz && sudo mv raz /usr/local/bin/raz
+          raz --version
+
+      - name: Generate VM password
+        run: |
+          PW="Bench-$(openssl rand -base64 24 | tr -dc 'A-Za-z0-9' | head -c 20)!"
+          echo "::add-mask::$PW"
+          echo "PW=$PW" >> "$GITHUB_ENV"
+
+      - name: Azure login (OIDC) for az
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: raz login (service principal, OIDC)
+        run: |
+          raz login --service-principal \
+            --client-id "${{ secrets.AZURE_CLIENT_ID }}" \
+            --tenant "${{ secrets.AZURE_TENANT_ID }}"
+
+      - name: Stage — az (per-command)
+        id: az
+        run: |
+          RG="bench-az-${RUN}"
+          az group create -n "$RG" -l "$LOC" -o none
+          t0=$(date +%s)
+          az network vnet create -g "$RG" -n hub    -l "$LOC"  --address-prefix 10.0.0.0/16 --subnet-name AppGatewaySubnet --subnet-prefix 10.0.1.0/24 -o none
+          az network vnet create -g "$RG" -n spoke1 -l "$LOC"  --address-prefix 10.1.0.0/16 --subnet-name snet-workload   --subnet-prefix 10.1.0.0/24 -o none
+          az network vnet create -g "$RG" -n spoke2 -l "$LOC2" --address-prefix 10.2.0.0/16 --subnet-name snet-workload   --subnet-prefix 10.2.0.0/24 -o none
+          az network vnet peering create -g "$RG" -n to-spoke1 --vnet-name hub    --remote-vnet spoke1 --allow-vnet-access -o none
+          az network vnet peering create -g "$RG" -n to-hub     --vnet-name spoke1 --remote-vnet hub    --allow-vnet-access -o none
+          az network vnet peering create -g "$RG" -n to-spoke2 --vnet-name hub    --remote-vnet spoke2 --allow-vnet-access -o none
+          az network vnet peering create -g "$RG" -n to-hub2    --vnet-name spoke2 --remote-vnet hub    --allow-vnet-access -o none
+          az network nsg create -g "$RG" -n nsg-workload -l "$LOC" -o none
+          az network public-ip create -g "$RG" -n pip-agw --sku Standard -l "$LOC" -o none
+          az network application-gateway create -g "$RG" -n agw -l "$LOC" --sku Standard_v2 --capacity 1 \
+            --public-ip-address pip-agw --vnet-name hub --subnet AppGatewaySubnet --priority 100 -o none
+          az vm create -g "$RG" -n vm1 -l "$LOC"  --image Ubuntu2204 --size Standard_B1s --admin-username azureuser --admin-password "$PW" --nsg "" --public-ip-address "" -o none
+          az vm create -g "$RG" -n vm2 -l "$LOC2" --image Ubuntu2204 --size Standard_B1s --admin-username azureuser --admin-password "$PW" --nsg "" --public-ip-address "" -o none
+          az storage account create -g "$RG" -n "a${RUN}st" --sku Standard_LRS -l "$LOC" -o none
+          az keyvault create -g "$RG" -n "a${RUN}kv" -l "$LOC" -o none
+          t1=$(date +%s)
+          count=$(az resource list -g "$RG" --query "length(@)" -o tsv)
+          t2=$(date +%s)
+          az group delete -n "$RG" --yes -o none
+          t3=$(date +%s)
+          { echo "create=$((t1-t0))"; echo "delete=$((t3-t2))"; echo "count=$count"; } >> "$GITHUB_OUTPUT"
+
+      - name: Stage — raz (native + rest)
+        id: raz
+        run: |
+          RG="bench-raz-${RUN}"
+          SUB=$(raz account show --query id -o json | tr -d '"')
+          base="/subscriptions/${SUB}/resourceGroups/${RG}/providers/Microsoft.Network"
+          raz group create -n "$RG" -l "$LOC" -o none
+          t0=$(date +%s)
+          # Native vnets (one subnet each).
+          raz vnet create -g "$RG" -n hub    -l "$LOC"  --address-prefix 10.0.0.0/16 --subnet-name AppGatewaySubnet --subnet-prefix 10.0.1.0/24 -o none
+          raz vnet create -g "$RG" -n spoke1 -l "$LOC"  --address-prefix 10.1.0.0/16 --subnet-name snet-workload   --subnet-prefix 10.1.0.0/24 -o none
+          raz vnet create -g "$RG" -n spoke2 -l "$LOC2" --address-prefix 10.2.0.0/16 --subnet-name snet-workload   --subnet-prefix 10.2.0.0/24 -o none
+          # Peerings (rest — raz has no peering verb).
+          for pair in "hub:spoke1:to-spoke1" "spoke1:hub:to-hub" "hub:spoke2:to-spoke2" "spoke2:hub:to-hub2"; do
+            src="${pair%%:*}"; rest="${pair#*:}"; dst="${rest%%:*}"; name="${rest#*:}"
+            raz rest -m PUT -u "${base}/virtualNetworks/${src}/virtualNetworkPeerings/${name}?api-version=${APIV}" \
+              -b "{\"properties\":{\"allowVirtualNetworkAccess\":true,\"remoteVirtualNetwork\":{\"id\":\"${base}/virtualNetworks/${dst}\"}}}" -o none
+          done
+          # NSG + public IP (rest).
+          raz rest -m PUT -u "${base}/networkSecurityGroups/nsg-workload?api-version=${APIV}" -b "{\"location\":\"${LOC}\",\"properties\":{}}" -o none
+          raz rest -m PUT -u "${base}/publicIPAddresses/pip-agw?api-version=${APIV}" -b "{\"location\":\"${LOC}\",\"sku\":{\"name\":\"Standard\"},\"properties\":{\"publicIPAllocationMethod\":\"Static\"}}" -o none
+          # Application Gateway (rest — large body, empty backend pool).
+          agwid="${base}/applicationGateways/agw"
+          raz rest -m PUT -u "${agwid}?api-version=${APIV}" -o none -b "$(cat <<JSON
+          {"location":"${LOC}","properties":{
+            "sku":{"name":"Standard_v2","tier":"Standard_v2","capacity":1},
+            "gatewayIPConfigurations":[{"name":"appGwIpConfig","properties":{"subnet":{"id":"${base}/virtualNetworks/hub/subnets/AppGatewaySubnet"}}}],
+            "frontendIPConfigurations":[{"name":"feip","properties":{"publicIPAddress":{"id":"${base}/publicIPAddresses/pip-agw"}}}],
+            "frontendPorts":[{"name":"port80","properties":{"port":80}}],
+            "backendAddressPools":[{"name":"pool","properties":{}}],
+            "backendHttpSettingsCollection":[{"name":"http","properties":{"port":80,"protocol":"Http","cookieBasedAffinity":"Disabled","requestTimeout":30}}],
+            "httpListeners":[{"name":"listener","properties":{"frontendIPConfiguration":{"id":"${agwid}/frontendIPConfigurations/feip"},"frontendPort":{"id":"${agwid}/frontendPorts/port80"},"protocol":"Http"}}],
+            "requestRoutingRules":[{"name":"rule","properties":{"ruleType":"Basic","priority":100,"httpListener":{"id":"${agwid}/httpListeners/listener"},"backendAddressPool":{"id":"${agwid}/backendAddressPools/pool"},"backendHttpSettings":{"id":"${agwid}/backendHttpSettingsCollection/http"}}}]
+          }}
+          JSON
+          )"
+          # VMs (native; raz vm create self-provisions networking, multi-region).
+          raz vm create -g "$RG" -n vm1 -l "$LOC"  --size Standard_B1s --admin-username azureuser --admin-password "$PW" -o none
+          raz vm create -g "$RG" -n vm2 -l "$LOC2" --size Standard_B1s --admin-username azureuser --admin-password "$PW" -o none
+          # Storage + Key Vault (native).
+          raz storage account create -g "$RG" -n "r${RUN}st" -l "$LOC" -o none
+          raz keyvault create -g "$RG" -n "r${RUN}kv" -l "$LOC" -o none
+          t1=$(date +%s)
+          count=$(raz resource list -g "$RG" --query "length(@)" -o json)
+          t2=$(date +%s)
+          raz group delete -n "$RG" --yes -o none
+          t3=$(date +%s)
+          { echo "create=$((t1-t0))"; echo "delete=$((t3-t2))"; echo "count=$count"; } >> "$GITHUB_OUTPUT"
+
+      - name: Rapid-ops micro-benchmark
+        id: micro
+        run: |
+          N=25
+          a0=$(date +%s)
+          for i in $(seq 1 $N); do az group create -n "mb-az-${RUN}-$i" -l "$LOC" -o none; done
+          for i in $(seq 1 $N); do az group delete -n "mb-az-${RUN}-$i" --yes --no-wait -o none; done
+          a1=$(date +%s)
+          r0=$(date +%s)
+          for i in $(seq 1 $N); do raz group create -n "mb-raz-${RUN}-$i" -l "$LOC" -o none; done
+          for i in $(seq 1 $N); do raz group delete -n "mb-raz-${RUN}-$i" --yes --no-wait -o none; done
+          r1=$(date +%s)
+          { echo "az=$((a1-a0))"; echo "raz=$((r1-r0))"; echo "n=$N"; } >> "$GITHUB_OUTPUT"
+
+      - name: Build report.md
+        if: always()
+        run: |
+          cat > report.md <<MD
+          # az vs raz — benchmark report (native / per-command)
+
+          - Run: \`${RUN}\` ($(date -u +%FT%TZ))
+          - Regions: ${LOC} + ${LOC2}
+          - Architecture (discrete CLI calls): hub-and-spoke (3 VNets, peered) · NSG · Public IP · Application Gateway (Standard_v2) · 2 Linux VMs (multi-region) · Key Vault · Storage
+          - raz uses native verbs for group/vnet/vm/storage/keyvault and \`raz rest\` PUTs for NSG, peerings, public IP and the Application Gateway.
+
+          ## Architecture — create + delete (per-command)
+          | Tool | Resources created | Create time | Delete time |
+          |------|------------------:|------------:|------------:|
+          | az   | ${{ steps.az.outputs.count }}  | ${{ steps.az.outputs.create }}s  | ${{ steps.az.outputs.delete }}s  |
+          | raz  | ${{ steps.raz.outputs.count }} | ${{ steps.raz.outputs.create }}s | ${{ steps.raz.outputs.delete }}s |
+
+          > Resource counts differ by design: \`raz vm create\` self-provisions a VNet/NIC/disk per VM
+          > (no subnet targeting), so raz reports extra network resources for its standalone VMs.
+          > Create time is still Azure-provisioning-bound (App Gateway ~10–15 min).
+
+          ## Rapid-ops micro-benchmark — ${{ steps.micro.outputs.n }}× empty resource-group create + delete
+          | Tool | Total |
+          |------|------:|
+          | az   | ${{ steps.micro.outputs.az }}s  |
+          | raz  | ${{ steps.micro.outputs.raz }}s |
+
+          > Per-invocation CLI overhead — where raz's near-zero startup (compiled Rust, no Python) shows.
+          MD
+          cat report.md
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-report-native
+          path: report.md
+
+      - name: Cleanup (always)
+        if: always()
+        run: |
+          az group delete -n "bench-az-${RUN}"  --yes --no-wait -o none 2>/dev/null || true
+          az group delete -n "bench-raz-${RUN}" --yes --no-wait -o none 2>/dev/null || true
+          for i in $(seq 1 25); do
+            az group delete -n "mb-az-${RUN}-$i"  --yes --no-wait -o none 2>/dev/null || true
+            az group delete -n "mb-raz-${RUN}-$i" --yes --no-wait -o none 2>/dev/null || true
+          done
