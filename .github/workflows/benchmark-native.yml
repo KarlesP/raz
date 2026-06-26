@@ -7,9 +7,8 @@ name: Benchmark (native)
 #
 # Manual only — REAL billable resources (App Gateway + 2 VMs). A final always() step tears everything down.
 #
-# Note: `raz vm create` self-provisions its own VNet/NIC (no subnet targeting), so the raz VMs are
-# standalone (multi-region) rather than wired into the spokes — reported honestly. The az VMs use
-# --nsg "" --public-ip-address "" to stay minimal.
+# Both tools join the VMs to the spoke subnets (--vnet-name/--subnet) and skip the public IP / NSG
+# (--public-ip-address "" / --nsg ""), so the architectures match 1:1.
 on:
   workflow_dispatch:
     inputs:
@@ -75,8 +74,8 @@ jobs:
           az network public-ip create -g "$RG" -n pip-agw --sku Standard -l "$LOC" -o none
           az network application-gateway create -g "$RG" -n agw -l "$LOC" --sku Standard_v2 --capacity 1 \
             --public-ip-address pip-agw --vnet-name hub --subnet AppGatewaySubnet --priority 100 -o none
-          az vm create -g "$RG" -n vm1 -l "$LOC"  --image Ubuntu2204 --size Standard_B1s --admin-username azureuser --admin-password "$PW" --nsg "" --public-ip-address "" -o none
-          az vm create -g "$RG" -n vm2 -l "$LOC2" --image Ubuntu2204 --size Standard_B1s --admin-username azureuser --admin-password "$PW" --nsg "" --public-ip-address "" -o none
+          az vm create -g "$RG" -n vm1 -l "$LOC"  --image Ubuntu2204 --size Standard_B1s --admin-username azureuser --admin-password "$PW" --vnet-name spoke1 --subnet snet-workload --nsg "" --public-ip-address "" -o none
+          az vm create -g "$RG" -n vm2 -l "$LOC2" --image Ubuntu2204 --size Standard_B1s --admin-username azureuser --admin-password "$PW" --vnet-name spoke2 --subnet snet-workload --nsg "" --public-ip-address "" -o none
           az storage account create -g "$RG" -n "a${RUN}st" --sku Standard_LRS -l "$LOC" -o none
           az keyvault create -g "$RG" -n "a${RUN}kv" -l "$LOC" -o none
           t1=$(date +%s)
@@ -122,9 +121,9 @@ jobs:
           }}
           JSON
           )"
-          # VMs (native; raz vm create self-provisions networking, multi-region).
-          raz vm create -g "$RG" -n vm1 -l "$LOC"  --size Standard_B1s --admin-username azureuser --admin-password "$PW" -o none
-          raz vm create -g "$RG" -n vm2 -l "$LOC2" --size Standard_B1s --admin-username azureuser --admin-password "$PW" -o none
+          # VMs (native; join the spoke subnets, no public IP / NSG — same as the az stage).
+          raz vm create -g "$RG" -n vm1 -l "$LOC"  --size Standard_B1s --admin-username azureuser --admin-password "$PW" --vnet-name spoke1 --subnet snet-workload --public-ip-address "" --nsg "" -o none
+          raz vm create -g "$RG" -n vm2 -l "$LOC2" --size Standard_B1s --admin-username azureuser --admin-password "$PW" --vnet-name spoke2 --subnet snet-workload --public-ip-address "" --nsg "" -o none
           # Storage + Key Vault (native).
           raz storage account create -g "$RG" -n "r${RUN}st" -l "$LOC" -o none
           raz keyvault create -g "$RG" -n "r${RUN}kv" -l "$LOC" -o none
@@ -157,7 +156,7 @@ jobs:
 
           - Run: \`${RUN}\` ($(date -u +%FT%TZ))
           - Regions: ${LOC} + ${LOC2}
-          - Architecture (discrete CLI calls): hub-and-spoke (3 VNets, peered) · NSG · Public IP · Application Gateway (Standard_v2) · 2 Linux VMs (multi-region) · Key Vault · Storage
+          - Architecture (discrete CLI calls): hub-and-spoke (3 VNets, peered) · NSG · Public IP · Application Gateway (Standard_v2) · 2 Linux VMs in the spokes (multi-region) · Key Vault · Storage
           - raz uses native verbs for group/vnet/vm/storage/keyvault and \`raz rest\` PUTs for NSG, peerings, public IP and the Application Gateway.
 
           ## Architecture — create + delete (per-command)
@@ -166,9 +165,8 @@ jobs:
           | az   | ${{ steps.az.outputs.count }}  | ${{ steps.az.outputs.create }}s  | ${{ steps.az.outputs.delete }}s  |
           | raz  | ${{ steps.raz.outputs.count }} | ${{ steps.raz.outputs.create }}s | ${{ steps.raz.outputs.delete }}s |
 
-          > Resource counts differ by design: \`raz vm create\` self-provisions a VNet/NIC/disk per VM
-          > (no subnet targeting), so raz reports extra network resources for its standalone VMs.
-          > Create time is still Azure-provisioning-bound (App Gateway ~10–15 min).
+          > Same architecture both ways (VMs joined to the spokes via --vnet-name/--subnet). Create
+          > time is Azure-provisioning-bound (App Gateway ~10–15 min).
 
           ## Rapid-ops micro-benchmark — ${{ steps.micro.outputs.n }}× empty resource-group create + delete
           | Tool | Total |
