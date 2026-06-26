@@ -1,0 +1,344 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "description": "az-vs-raz benchmark architecture: hub-and-spoke (3 vnets, peered), multi-region Linux VMs (weu+neu), Standard_v2 Application Gateway, plus NSGs, Key Vault and Storage. Deployed identically by `az deployment group create` and `raz deployment group create`."
+  },
+  "parameters": {
+    "location": { "type": "string", "defaultValue": "westeurope" },
+    "location2": { "type": "string", "defaultValue": "northeurope" },
+    "prefix": { "type": "string", "defaultValue": "bench" },
+    "adminUsername": { "type": "string", "defaultValue": "azureuser" },
+    "adminPassword": { "type": "securestring" }
+  },
+  "variables": {
+    "hubVnet": "[concat(parameters('prefix'), '-vnet-hub')]",
+    "spoke1Vnet": "[concat(parameters('prefix'), '-vnet-spoke1')]",
+    "spoke2Vnet": "[concat(parameters('prefix'), '-vnet-spoke2')]",
+    "nsgHub": "[concat(parameters('prefix'), '-nsg-hub')]",
+    "nsgSpoke1": "[concat(parameters('prefix'), '-nsg-spoke1')]",
+    "nsgSpoke2": "[concat(parameters('prefix'), '-nsg-spoke2')]",
+    "pipName": "[concat(parameters('prefix'), '-pip-agw')]",
+    "agwName": "[concat(parameters('prefix'), '-agw')]",
+    "nic1": "[concat(parameters('prefix'), '-nic-vm1')]",
+    "nic2": "[concat(parameters('prefix'), '-nic-vm2')]",
+    "vm1": "[concat(parameters('prefix'), '-vm1')]",
+    "vm2": "[concat(parameters('prefix'), '-vm2')]",
+    "kvName": "[take(concat(parameters('prefix'), 'kv', uniqueString(resourceGroup().id)), 24)]",
+    "stName": "[take(toLower(concat(parameters('prefix'), 'st', uniqueString(resourceGroup().id))), 24)]",
+    "vm1Ip": "10.1.0.4",
+    "vm2Ip": "10.2.0.4",
+    "agwId": "[resourceId('Microsoft.Network/applicationGateways', variables('agwName'))]"
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Network/networkSecurityGroups",
+      "apiVersion": "2023-09-01",
+      "name": "[variables('nsgSpoke1')]",
+      "location": "[parameters('location')]",
+      "properties": { "securityRules": [] }
+    },
+    {
+      "type": "Microsoft.Network/networkSecurityGroups",
+      "apiVersion": "2023-09-01",
+      "name": "[variables('nsgSpoke2')]",
+      "location": "[parameters('location2')]",
+      "properties": { "securityRules": [] }
+    },
+    {
+      "type": "Microsoft.Network/networkSecurityGroups",
+      "apiVersion": "2023-09-01",
+      "name": "[variables('nsgHub')]",
+      "location": "[parameters('location')]",
+      "properties": { "securityRules": [] }
+    },
+    {
+      "type": "Microsoft.Network/virtualNetworks",
+      "apiVersion": "2023-09-01",
+      "name": "[variables('hubVnet')]",
+      "location": "[parameters('location')]",
+      "dependsOn": [ "[resourceId('Microsoft.Network/networkSecurityGroups', variables('nsgHub'))]" ],
+      "properties": {
+        "addressSpace": { "addressPrefixes": [ "10.0.0.0/16" ] },
+        "subnets": [
+          { "name": "AppGatewaySubnet", "properties": { "addressPrefix": "10.0.1.0/24" } },
+          {
+            "name": "default",
+            "properties": {
+              "addressPrefix": "10.0.0.0/24",
+              "networkSecurityGroup": { "id": "[resourceId('Microsoft.Network/networkSecurityGroups', variables('nsgHub'))]" }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "type": "Microsoft.Network/virtualNetworks",
+      "apiVersion": "2023-09-01",
+      "name": "[variables('spoke1Vnet')]",
+      "location": "[parameters('location')]",
+      "dependsOn": [ "[resourceId('Microsoft.Network/networkSecurityGroups', variables('nsgSpoke1'))]" ],
+      "properties": {
+        "addressSpace": { "addressPrefixes": [ "10.1.0.0/16" ] },
+        "subnets": [
+          {
+            "name": "snet-workload",
+            "properties": {
+              "addressPrefix": "10.1.0.0/24",
+              "networkSecurityGroup": { "id": "[resourceId('Microsoft.Network/networkSecurityGroups', variables('nsgSpoke1'))]" }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "type": "Microsoft.Network/virtualNetworks",
+      "apiVersion": "2023-09-01",
+      "name": "[variables('spoke2Vnet')]",
+      "location": "[parameters('location2')]",
+      "dependsOn": [ "[resourceId('Microsoft.Network/networkSecurityGroups', variables('nsgSpoke2'))]" ],
+      "properties": {
+        "addressSpace": { "addressPrefixes": [ "10.2.0.0/16" ] },
+        "subnets": [
+          {
+            "name": "snet-workload",
+            "properties": {
+              "addressPrefix": "10.2.0.0/24",
+              "networkSecurityGroup": { "id": "[resourceId('Microsoft.Network/networkSecurityGroups', variables('nsgSpoke2'))]" }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "type": "Microsoft.Network/virtualNetworks/virtualNetworkPeerings",
+      "apiVersion": "2023-09-01",
+      "name": "[concat(variables('hubVnet'), '/to-spoke1')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/virtualNetworks', variables('hubVnet'))]",
+        "[resourceId('Microsoft.Network/virtualNetworks', variables('spoke1Vnet'))]"
+      ],
+      "properties": {
+        "allowVirtualNetworkAccess": true,
+        "allowForwardedTraffic": true,
+        "remoteVirtualNetwork": { "id": "[resourceId('Microsoft.Network/virtualNetworks', variables('spoke1Vnet'))]" }
+      }
+    },
+    {
+      "type": "Microsoft.Network/virtualNetworks/virtualNetworkPeerings",
+      "apiVersion": "2023-09-01",
+      "name": "[concat(variables('spoke1Vnet'), '/to-hub')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/virtualNetworks', variables('hubVnet'))]",
+        "[resourceId('Microsoft.Network/virtualNetworks', variables('spoke1Vnet'))]"
+      ],
+      "properties": {
+        "allowVirtualNetworkAccess": true,
+        "allowForwardedTraffic": true,
+        "remoteVirtualNetwork": { "id": "[resourceId('Microsoft.Network/virtualNetworks', variables('hubVnet'))]" }
+      }
+    },
+    {
+      "type": "Microsoft.Network/virtualNetworks/virtualNetworkPeerings",
+      "apiVersion": "2023-09-01",
+      "name": "[concat(variables('hubVnet'), '/to-spoke2')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/virtualNetworks', variables('hubVnet'))]",
+        "[resourceId('Microsoft.Network/virtualNetworks', variables('spoke2Vnet'))]"
+      ],
+      "properties": {
+        "allowVirtualNetworkAccess": true,
+        "allowForwardedTraffic": true,
+        "remoteVirtualNetwork": { "id": "[resourceId('Microsoft.Network/virtualNetworks', variables('spoke2Vnet'))]" }
+      }
+    },
+    {
+      "type": "Microsoft.Network/virtualNetworks/virtualNetworkPeerings",
+      "apiVersion": "2023-09-01",
+      "name": "[concat(variables('spoke2Vnet'), '/to-hub')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/virtualNetworks', variables('hubVnet'))]",
+        "[resourceId('Microsoft.Network/virtualNetworks', variables('spoke2Vnet'))]"
+      ],
+      "properties": {
+        "allowVirtualNetworkAccess": true,
+        "allowForwardedTraffic": true,
+        "remoteVirtualNetwork": { "id": "[resourceId('Microsoft.Network/virtualNetworks', variables('hubVnet'))]" }
+      }
+    },
+    {
+      "type": "Microsoft.Network/publicIPAddresses",
+      "apiVersion": "2023-09-01",
+      "name": "[variables('pipName')]",
+      "location": "[parameters('location')]",
+      "sku": { "name": "Standard" },
+      "properties": { "publicIPAllocationMethod": "Static" }
+    },
+    {
+      "type": "Microsoft.Network/networkInterfaces",
+      "apiVersion": "2023-09-01",
+      "name": "[variables('nic1')]",
+      "location": "[parameters('location')]",
+      "dependsOn": [ "[resourceId('Microsoft.Network/virtualNetworks', variables('spoke1Vnet'))]" ],
+      "properties": {
+        "ipConfigurations": [
+          {
+            "name": "ipconfig1",
+            "properties": {
+              "privateIPAllocationMethod": "Static",
+              "privateIPAddress": "[variables('vm1Ip')]",
+              "subnet": { "id": "[resourceId('Microsoft.Network/virtualNetworks/subnets', variables('spoke1Vnet'), 'snet-workload')]" }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "type": "Microsoft.Network/networkInterfaces",
+      "apiVersion": "2023-09-01",
+      "name": "[variables('nic2')]",
+      "location": "[parameters('location2')]",
+      "dependsOn": [ "[resourceId('Microsoft.Network/virtualNetworks', variables('spoke2Vnet'))]" ],
+      "properties": {
+        "ipConfigurations": [
+          {
+            "name": "ipconfig1",
+            "properties": {
+              "privateIPAllocationMethod": "Static",
+              "privateIPAddress": "[variables('vm2Ip')]",
+              "subnet": { "id": "[resourceId('Microsoft.Network/virtualNetworks/subnets', variables('spoke2Vnet'), 'snet-workload')]" }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "type": "Microsoft.Compute/virtualMachines",
+      "apiVersion": "2024-07-01",
+      "name": "[variables('vm1')]",
+      "location": "[parameters('location')]",
+      "dependsOn": [ "[resourceId('Microsoft.Network/networkInterfaces', variables('nic1'))]" ],
+      "properties": {
+        "hardwareProfile": { "vmSize": "Standard_B1s" },
+        "storageProfile": {
+          "imageReference": { "publisher": "Canonical", "offer": "0001-com-ubuntu-server-jammy", "sku": "22_04-lts-gen2", "version": "latest" },
+          "osDisk": { "createOption": "FromImage", "managedDisk": { "storageAccountType": "Standard_LRS" } }
+        },
+        "osProfile": {
+          "computerName": "[variables('vm1')]",
+          "adminUsername": "[parameters('adminUsername')]",
+          "adminPassword": "[parameters('adminPassword')]",
+          "linuxConfiguration": { "disablePasswordAuthentication": false }
+        },
+        "networkProfile": { "networkInterfaces": [ { "id": "[resourceId('Microsoft.Network/networkInterfaces', variables('nic1'))]" } ] }
+      }
+    },
+    {
+      "type": "Microsoft.Compute/virtualMachines",
+      "apiVersion": "2024-07-01",
+      "name": "[variables('vm2')]",
+      "location": "[parameters('location2')]",
+      "dependsOn": [ "[resourceId('Microsoft.Network/networkInterfaces', variables('nic2'))]" ],
+      "properties": {
+        "hardwareProfile": { "vmSize": "Standard_B1s" },
+        "storageProfile": {
+          "imageReference": { "publisher": "Canonical", "offer": "0001-com-ubuntu-server-jammy", "sku": "22_04-lts-gen2", "version": "latest" },
+          "osDisk": { "createOption": "FromImage", "managedDisk": { "storageAccountType": "Standard_LRS" } }
+        },
+        "osProfile": {
+          "computerName": "[variables('vm2')]",
+          "adminUsername": "[parameters('adminUsername')]",
+          "adminPassword": "[parameters('adminPassword')]",
+          "linuxConfiguration": { "disablePasswordAuthentication": false }
+        },
+        "networkProfile": { "networkInterfaces": [ { "id": "[resourceId('Microsoft.Network/networkInterfaces', variables('nic2'))]" } ] }
+      }
+    },
+    {
+      "type": "Microsoft.Network/applicationGateways",
+      "apiVersion": "2023-09-01",
+      "name": "[variables('agwName')]",
+      "location": "[parameters('location')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Network/virtualNetworks', variables('hubVnet'))]",
+        "[resourceId('Microsoft.Network/publicIPAddresses', variables('pipName'))]"
+      ],
+      "properties": {
+        "sku": { "name": "Standard_v2", "tier": "Standard_v2", "capacity": 1 },
+        "gatewayIPConfigurations": [
+          {
+            "name": "appGatewayIpConfig",
+            "properties": { "subnet": { "id": "[resourceId('Microsoft.Network/virtualNetworks/subnets', variables('hubVnet'), 'AppGatewaySubnet')]" } }
+          }
+        ],
+        "frontendIPConfigurations": [
+          {
+            "name": "appGwPublicFrontendIp",
+            "properties": { "publicIPAddress": { "id": "[resourceId('Microsoft.Network/publicIPAddresses', variables('pipName'))]" } }
+          }
+        ],
+        "frontendPorts": [ { "name": "port_80", "properties": { "port": 80 } } ],
+        "backendAddressPools": [
+          {
+            "name": "spokeVmsPool",
+            "properties": { "backendAddresses": [ { "ipAddress": "[variables('vm1Ip')]" }, { "ipAddress": "[variables('vm2Ip')]" } ] }
+          }
+        ],
+        "backendHttpSettingsCollection": [
+          {
+            "name": "httpSettings",
+            "properties": { "port": 80, "protocol": "Http", "cookieBasedAffinity": "Disabled", "requestTimeout": 30 }
+          }
+        ],
+        "httpListeners": [
+          {
+            "name": "httpListener",
+            "properties": {
+              "frontendIPConfiguration": { "id": "[concat(variables('agwId'), '/frontendIPConfigurations/appGwPublicFrontendIp')]" },
+              "frontendPort": { "id": "[concat(variables('agwId'), '/frontendPorts/port_80')]" },
+              "protocol": "Http"
+            }
+          }
+        ],
+        "requestRoutingRules": [
+          {
+            "name": "rule1",
+            "properties": {
+              "ruleType": "Basic",
+              "priority": 100,
+              "httpListener": { "id": "[concat(variables('agwId'), '/httpListeners/httpListener')]" },
+              "backendAddressPool": { "id": "[concat(variables('agwId'), '/backendAddressPools/spokeVmsPool')]" },
+              "backendHttpSettings": { "id": "[concat(variables('agwId'), '/backendHttpSettingsCollection/httpSettings')]" }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "type": "Microsoft.KeyVault/vaults",
+      "apiVersion": "2023-07-01",
+      "name": "[variables('kvName')]",
+      "location": "[parameters('location')]",
+      "properties": {
+        "tenantId": "[subscription().tenantId]",
+        "sku": { "family": "A", "name": "standard" },
+        "enableRbacAuthorization": true,
+        "accessPolicies": []
+      }
+    },
+    {
+      "type": "Microsoft.Storage/storageAccounts",
+      "apiVersion": "2023-01-01",
+      "name": "[variables('stName')]",
+      "location": "[parameters('location')]",
+      "sku": { "name": "Standard_LRS" },
+      "kind": "StorageV2"
+    }
+  ],
+  "outputs": {
+    "appGatewayPublicIp": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Network/publicIPAddresses', variables('pipName'))).ipAddress]"
+    }
+  }
+}
