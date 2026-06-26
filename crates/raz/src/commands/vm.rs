@@ -41,6 +41,18 @@ pub enum VmCommand {
         /// Admin password (alternative to --ssh-key-value).
         #[arg(long)]
         admin_password: Option<String>,
+        /// VNet to use or create (default: <name>-vnet).
+        #[arg(long)]
+        vnet_name: Option<String>,
+        /// Subnet within the VNet to use or create (default: default).
+        #[arg(long)]
+        subnet: Option<String>,
+        /// Public IP to create and attach; pass "" to skip (default: <name>-pip).
+        #[arg(long)]
+        public_ip_address: Option<String>,
+        /// NSG to create and attach to the NIC; pass "" to skip (default: <name>-nsg).
+        #[arg(long)]
+        nsg: Option<String>,
     },
     /// Update a VM's size and/or tags.
     Update {
@@ -120,11 +132,23 @@ pub async fn run(command: VmCommand, globals: GlobalArgs) -> Result<()> {
             admin_username,
             ssh_key_value,
             admin_password,
+            vnet_name,
+            subnet,
+            public_ip_address,
+            nsg,
         } => {
             let (ctx, client, sub) = arm_context(globals).await?;
             let location = ctx.resolve_location(location);
             super::print_caf_recommendation("vm", &name, &location);
             eprintln!("Creating VM '{name}' in {location} (this can take a few minutes)…");
+            let vnet_name = vnet_name.unwrap_or_else(|| format!("{name}-vnet"));
+            let subnet = subnet.unwrap_or_else(|| "default".to_string());
+            let public_ip = raz_core::arm::vm::optional_resource_name(
+                public_ip_address.as_deref(),
+                &format!("{name}-pip"),
+            );
+            let nsg =
+                raz_core::arm::vm::optional_resource_name(nsg.as_deref(), &format!("{name}-nsg"));
             let value = vm::create(
                 &client,
                 &VmCreate {
@@ -136,6 +160,10 @@ pub async fn run(command: VmCommand, globals: GlobalArgs) -> Result<()> {
                     admin_username: &admin_username,
                     ssh_key: ssh_key_value.as_deref(),
                     admin_password: admin_password.as_deref(),
+                    vnet_name: &vnet_name,
+                    subnet_name: &subnet,
+                    public_ip: public_ip.as_deref(),
+                    nsg: nsg.as_deref(),
                 },
             )
             .await?;
