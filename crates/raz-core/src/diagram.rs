@@ -1,5 +1,6 @@
-//! Topology diagrams from the resources raz lists. One model, two renderers: Mermaid (CLI + TUI)
-//! and ASCII (TUI). Edges are derived from network resource details (vnet→subnet→nic→vm).
+//! Topology diagrams from the resources raz lists. Mermaid renderer (`to_mermaid`) over a shared
+//! topology model; edges from network resource details (vnet→subnet→nic→vm). The ASCII renderer is
+//! feature-flagged off for now — see the note above `to_mermaid`.
 
 use std::collections::HashMap;
 
@@ -182,59 +183,16 @@ pub fn to_mermaid(t: &Topology) -> String {
     s
 }
 
-/// Render as an indented Unicode tree: subscription → RG → resources, nesting via edges.
-pub fn to_ascii(t: &Topology) -> String {
-    let idx = id_index(t);
-    // children[parent] = [child indices]; track which nodes have a parent (incoming edge).
-    let mut children: Vec<Vec<usize>> = vec![Vec::new(); t.nodes.len()];
-    let mut has_parent = vec![false; t.nodes.len()];
-    for e in &t.edges {
-        if let (Some(&a), Some(&b)) = (idx.get(e.from.as_str()), idx.get(e.to.as_str())) {
-            children[a].push(b);
-            has_parent[b] = true;
-        }
-    }
-
-    let mut out = format!("Subscription {}\n", t.subscription);
-    for (gi, (rg, members)) in t.groups.iter().enumerate() {
-        let last_rg = gi + 1 == t.groups.len();
-        out.push_str(&format!("{}─ rg: {rg}\n", if last_rg { "└" } else { "├" }));
-        let rg_prefix = if last_rg { "   " } else { "│  " };
-        // Roots within this RG: nodes with no incoming edge.
-        let roots: Vec<usize> = members
-            .iter()
-            .copied()
-            .filter(|&i| !has_parent[i])
-            .collect();
-        for (ri, &root) in roots.iter().enumerate() {
-            let last = ri + 1 == roots.len();
-            render_node(t, &children, root, &mut out, rg_prefix, last);
-        }
-    }
-    out
-}
-
-fn render_node(
-    t: &Topology,
-    children: &[Vec<usize>],
-    node: usize,
-    out: &mut String,
-    prefix: &str,
-    last: bool,
-) {
-    let n = &t.nodes[node];
-    out.push_str(&format!(
-        "{prefix}{}─ {}: {}\n",
-        if last { "└" } else { "├" },
-        n.kind,
-        n.name
-    ));
-    let child_prefix = format!("{prefix}{}  ", if last { " " } else { "│" });
-    let kids = &children[node];
-    for (ci, &c) in kids.iter().enumerate() {
-        render_node(t, children, c, out, &child_prefix, ci + 1 == kids.len());
-    }
-}
+// ---------------------------------------------------------------------------
+// ASCII diagram renderer — FEATURE FLAGGED OFF for the moment.
+//
+// An indented Unicode-tree renderer (`to_ascii`: subscription → RG → vnet → subnet
+// → nic → vm, using the same edges as `to_mermaid`) was built here for the planned
+// TUI "Diagram" view. That consumer hasn't shipped, so rather than carry ~55 lines
+// of dead code the renderer is parked. The topology model + edges it needs are
+// already produced by `build()` above. Restore from git history (commit e94a946)
+// or rebuild when the TUI Diagram tab lands.
+// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
@@ -276,16 +234,11 @@ mod tests {
     }
 
     #[test]
-    fn renders_both_formats() {
+    fn renders_mermaid() {
         let t = fixture();
         let m = to_mermaid(&t);
         assert!(m.contains("```mermaid"));
         assert!(m.contains("graph TD"));
         assert!(m.contains("-->"));
-        let a = to_ascii(&t);
-        assert!(a.contains("rg: rg1"));
-        assert!(a.contains("vnet: hub"));
-        assert!(a.contains("snet: default"));
-        assert!(a.contains("vm: vm1"));
     }
 }
